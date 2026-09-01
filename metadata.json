@@ -1,0 +1,6 @@
+{
+  "name": "Bongkar WH CKL",
+  "description": "Sistem Monitoring Proses Bongkaran Barang Supplier WH CKL terintegrasi untuk Security, Admin Gudang, Operator Bongkar, dan SPV Wallboard dengan tracking lead time real-time.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
