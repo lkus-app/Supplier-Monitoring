@@ -7,7 +7,7 @@ import {
   Tv, 
   Volume2, 
   VolumeX, 
-  RotateCcw, 
+  RefreshCw, 
   Clock, 
   Warehouse,
   Sparkles,
@@ -16,7 +16,8 @@ import {
   LogOut,
   User,
   Lock,
-  HardDrive
+  HardDrive,
+  Radio
 } from 'lucide-react';
 import { useWarehouse } from '../context/WarehouseContext';
 import { RoleType } from '../types';
@@ -32,7 +33,8 @@ export const Navbar: React.FC = () => {
     stats, 
     soundEnabled, 
     setSoundEnabled, 
-    resetToDemoData,
+    isSyncing,
+    refreshDataFromServer,
     setIsWallboardOpen,
     setIsAiModalOpen
   } = useWarehouse();
@@ -116,6 +118,12 @@ export const Navbar: React.FC = () => {
 
         {/* Live Operational Status & Quick Action Buttons */}
         <div className="flex items-center gap-2 sm:gap-2.5 flex-wrap">
+          {/* Real-time Sync Status Indicator */}
+          <div className="hidden sm:flex items-center gap-1.5 px-2 py-1 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-semibold">
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+            <span className="text-[11px]">Live Sync 3s</span>
+          </div>
+
           {/* Overdue Warning Pill */}
           {stats.overdueCount > 0 && (
             <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs font-bold animate-pulse">
@@ -177,18 +185,14 @@ export const Navbar: React.FC = () => {
             {soundEnabled ? <Volume2 className="w-4 h-4 text-blue-600" /> : <VolumeX className="w-4 h-4" />}
           </button>
 
-          {/* Reset Demo Data Button */}
+          {/* Refresh / Force Sync Button */}
           <button
-            onClick={() => {
-              if (window.confirm('Reset data simulasi ke data awal contoh?')) {
-                resetToDemoData();
-              }
-            }}
-            id="btn-reset-demo"
+            onClick={() => refreshDataFromServer()}
+            id="btn-nav-refresh-sync"
             className="p-1.5 rounded-lg bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-600 transition cursor-pointer"
-            title="Reset Data Simulasi Demo"
+            title="Muat Ulang & Sinkronkan Data dari Server"
           >
-            <RotateCcw className="w-4 h-4" />
+            <RefreshCw className={`w-4 h-4 ${isSyncing ? 'animate-spin text-blue-600' : ''}`} />
           </button>
 
           {/* User Profile / Logout Button */}
@@ -201,7 +205,7 @@ export const Navbar: React.FC = () => {
               <button
                 onClick={logout}
                 id="btn-nav-logout"
-                className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-700 text-xs font-bold transition cursor-pointer"
+                className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-700 text-xs font-bold transition cursor-pointer"
                 title="Logout & Kembali ke Portal Utama"
               >
                 <LogOut className="w-3.5 h-3.5" />

@@ -159,6 +159,90 @@ async function resolveGoogleDriveFolders(apiKey?: string, token?: string) {
 }
 
 // ----------------------------------------------------
+// 0. In-memory Centralized State for Real-Time Sync
+// ----------------------------------------------------
+let serverUnloadingRecords: any[] = [];
+let serverRecordsVersion = 1;
+let serverLastUpdated = new Date().toISOString();
+
+// API: Get All Unloading Records (For Real-time Sync & Polling)
+app.get('/api/unloading-records', (req: Request, res: Response) => {
+  res.json({
+    success: true,
+    records: serverUnloadingRecords,
+    version: serverRecordsVersion,
+    lastUpdated: serverLastUpdated,
+    count: serverUnloadingRecords.length,
+  });
+});
+
+// API: Replace/Batch Save Unloading Records
+app.post('/api/unloading-records', (req: Request, res: Response) => {
+  try {
+    const { records } = req.body;
+    if (Array.isArray(records)) {
+      serverUnloadingRecords = records;
+      serverRecordsVersion += 1;
+      serverLastUpdated = new Date().toISOString();
+      return res.json({
+        success: true,
+        records: serverUnloadingRecords,
+        version: serverRecordsVersion,
+        lastUpdated: serverLastUpdated,
+      });
+    }
+    return res.status(400).json({ success: false, message: 'records array is required' });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// API: Upsert Single Unloading Record
+app.post('/api/unloading-records/item', (req: Request, res: Response) => {
+  try {
+    const { record } = req.body;
+    if (!record || !record.id) {
+      return res.status(400).json({ success: false, message: 'record object with valid id is required' });
+    }
+    const idx = serverUnloadingRecords.findIndex((r) => r.id === record.id);
+    if (idx >= 0) {
+      serverUnloadingRecords[idx] = { ...serverUnloadingRecords[idx], ...record };
+    } else {
+      serverUnloadingRecords.unshift(record);
+    }
+    serverRecordsVersion += 1;
+    serverLastUpdated = new Date().toISOString();
+    return res.json({
+      success: true,
+      record,
+      records: serverUnloadingRecords,
+      version: serverRecordsVersion,
+      lastUpdated: serverLastUpdated,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// API: Delete Unloading Record
+app.delete('/api/unloading-records/:id', (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    serverUnloadingRecords = serverUnloadingRecords.filter((r) => r.id !== id);
+    serverRecordsVersion += 1;
+    serverLastUpdated = new Date().toISOString();
+    return res.json({
+      success: true,
+      records: serverUnloadingRecords,
+      version: serverRecordsVersion,
+      lastUpdated: serverLastUpdated,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ----------------------------------------------------
 // 1. API: Google Drive Folder Structure
 // ----------------------------------------------------
 app.get('/api/drive/folders', async (req: Request, res: Response) => {

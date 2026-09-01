@@ -1,29 +1,23 @@
-import React, { useState, useRef } from 'react';
+import React, { useState } from 'react';
 import { 
   ShieldCheck, 
   Truck, 
   User, 
   Phone, 
   FileText, 
-  Camera, 
   CheckCircle2, 
-  Printer, 
-  QrCode, 
-  Upload, 
-  X, 
-  Info,
-  Clock,
-  ArrowRight,
-  ArrowLeft,
-  Home,
-  LogOut
+  ArrowLeft, 
+  Home, 
+  Clock, 
+  Sparkles,
+  ArrowRight
 } from 'lucide-react';
 import { useWarehouse } from '../context/WarehouseContext';
 import { VehicleType, VEHICLE_LEAD_TIMES, UnloadingRecord } from '../types';
-import { formatDateTime, formatShortTime } from '../utils/timeUtils';
+import { formatShortTime } from '../utils/timeUtils';
 
 export const SecurityView: React.FC = () => {
-  const { addTruckGateIn, records, setSelectedRecord, setActiveRole, returnToPortal } = useWarehouse();
+  const { addTruckGateIn, records, returnToPortal } = useWarehouse();
 
   // Form states
   const [supplierName, setSupplierName] = useState('');
@@ -31,17 +25,12 @@ export const SecurityView: React.FC = () => {
   const [licensePlate, setLicensePlate] = useState('');
   const [vehicleType, setVehicleType] = useState<VehicleType>('CDD');
   const [driverPhone, setDriverPhone] = useState('');
-  const [suratJalanNumber, setSuratJalanNumber] = useState('');
-  const [suratJalanPhoto, setSuratJalanPhoto] = useState<string | null>(null);
-  const [photoFileName, setPhotoFileName] = useState('');
   
-  // Last created gate pass ticket for modal display
+  // Last submitted record for quick on-screen feedback
   const [lastSubmittedTicket, setLastSubmittedTicket] = useState<UnloadingRecord | null>(null);
   const [isSuccessToast, setIsSuccessToast] = useState(false);
 
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  // Quick Preset Suppliers for rapid Security entry in fast paced environment
+  // Quick Preset Suppliers for rapid Security entry
   const quickSuppliers = [
     'PT Indofood CBP Sukses Makmur',
     'PT Unilever Logistics Indonesia',
@@ -51,45 +40,19 @@ export const SecurityView: React.FC = () => {
     'PT Wings Surya Distribusi'
   ];
 
-  // Handle Photo upload simulation / base64
-  const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      setPhotoFileName(file.name);
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setSuratJalanPhoto(reader.result as string);
-      };
-      reader.readAsDataURL(file);
-    }
-  };
-
-  const handleCaptureSamplePhoto = () => {
-    // Sample high-quality document mock
-    const samplePhotos = [
-      'https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?w=800&auto=format&fit=crop&q=60',
-      'https://images.unsplash.com/photo-1616401784845-180882ba9ba8?w=800&auto=format&fit=crop&q=60',
-    ];
-    const picked = samplePhotos[Math.floor(Math.random() * samplePhotos.length)];
-    setSuratJalanPhoto(picked);
-    setPhotoFileName('surat_jalan_camera_capture.jpg');
-  };
-
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!supplierName.trim() || !driverName.trim() || !licensePlate.trim()) {
-      alert('Mohon lengkapi Nama Supplier, Nama Driver, dan Nomor Polisi.');
+      alert('Mohon lengkapi Nama Supplier, Nama Driver, dan Nomor Plat Kendaraan.');
       return;
     }
 
     const newRecord = addTruckGateIn({
-      supplierName,
-      driverName,
-      licensePlate,
+      supplierName: supplierName.trim(),
+      driverName: driverName.trim(),
+      licensePlate: licensePlate.trim().toUpperCase(),
       vehicleType,
-      driverPhone,
-      suratJalanNumber: suratJalanNumber || `SJ-${Date.now().toString().slice(-6)}`,
-      suratJalanPhoto: suratJalanPhoto || undefined,
+      driverPhone: driverPhone.trim() || undefined,
     });
 
     // Reset Form
@@ -97,40 +60,36 @@ export const SecurityView: React.FC = () => {
     setDriverName('');
     setLicensePlate('');
     setDriverPhone('');
-    setSuratJalanNumber('');
-    setSuratJalanPhoto(null);
-    setPhotoFileName('');
 
-    // Show Success Modal / Ticket
+    // Feedback
     setLastSubmittedTicket(newRecord);
     setIsSuccessToast(true);
-    setTimeout(() => setIsSuccessToast(false), 4000);
+    setTimeout(() => setIsSuccessToast(false), 5000);
   };
 
-  // Recent Gate In List
-  const todayEntries = records.slice(0, 8);
-
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+    <div className="max-w-4xl mx-auto px-4 sm:px-6 py-6 space-y-6">
       {/* Toast Notification */}
       {isSuccessToast && (
-        <div className="fixed bottom-6 right-6 z-50 bg-emerald-600 text-white px-4 py-3 rounded-xl shadow-2xl flex items-center gap-3 border border-emerald-500">
-          <CheckCircle2 className="w-5 h-5" />
+        <div className="fixed bottom-6 right-6 z-50 bg-emerald-600 text-white px-5 py-3.5 rounded-2xl shadow-2xl flex items-center gap-3 border border-emerald-500 animate-in fade-in slide-in-from-bottom-5">
+          <CheckCircle2 className="w-6 h-6 shrink-0 text-white" />
           <div>
             <p className="font-bold text-sm">Gate-In Berhasil Dicatat (T1)!</p>
-            <p className="text-xs text-emerald-100">Nomor antrean dan timestamp otomatis diteruskan ke Admin Gudang.</p>
+            <p className="text-xs text-emerald-100">
+              Nomor antrean <strong className="underline">{lastSubmittedTicket?.queueNumber}</strong> otomatis diteruskan ke Admin Gudang.
+            </p>
           </div>
         </div>
       )}
 
-      {/* Header Banner */}
-      <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
+      {/* Top Header Card */}
+      <div className="bg-white p-5 sm:p-6 rounded-2xl border border-slate-200 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="space-y-1">
           <div className="flex items-center gap-2">
             <button
               onClick={returnToPortal}
-              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition cursor-pointer mr-1"
-              title="Kembali ke Halaman Utama"
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition cursor-pointer"
+              title="Kembali ke Portal Utama"
             >
               <ArrowLeft className="w-3.5 h-3.5" />
               <span>Portal</span>
@@ -138,422 +97,225 @@ export const SecurityView: React.FC = () => {
             <span className="p-1 rounded-lg bg-blue-50 text-blue-600">
               <ShieldCheck className="w-4 h-4" />
             </span>
-            <span className="text-xs font-bold uppercase tracking-wider text-blue-600">
-              POS KEAMANAN &amp; PINTU MASUK (GATE-IN)
+            <span className="text-xs font-extrabold uppercase tracking-wider text-blue-600">
+              POS KEAMANAN &amp; GATE-IN
             </span>
           </div>
-          <h2 className="text-xl sm:text-2xl font-black text-slate-800">
-            Formulir Pendaftaran Kedatangan Truk Supplier (T1)
+          <h2 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">
+            Pendaftaran Kedatangan Truk (T1)
           </h2>
           <p className="text-xs sm:text-sm text-slate-500">
-            Catat timestamp kedatangan pintu gerbang (T1) secara instan. Data otomatis sinkron ke Admin Gudang &amp; Operator.
+            Formulir kilat pencatatan kedatangan armada di pos gerbang security.
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-3 bg-slate-50 p-3 rounded-xl border border-slate-200">
-            <div className="text-right">
-              <p className="text-xs text-slate-500 font-medium">Total Truk Hari Ini</p>
-              <p className="text-2xl font-black text-slate-800 font-mono">{records.length}</p>
-            </div>
-            <div className="h-8 w-px bg-slate-200" />
-            <div className="text-right">
-              <p className="text-xs text-slate-500 font-medium">Standar T1</p>
-              <p className="text-xs font-bold text-emerald-600">Auto Timestamp</p>
-            </div>
+        <div className="flex items-center gap-2 self-start sm:self-center">
+          <div className="px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 text-right">
+            <span className="text-[10px] text-slate-500 font-semibold uppercase block">Total Hari Ini</span>
+            <span className="text-lg font-black text-slate-900 font-mono">{records.length} Truk</span>
           </div>
           <button
             onClick={returnToPortal}
-            className="hidden sm:flex items-center gap-1.5 px-3 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs transition cursor-pointer border border-slate-200"
+            className="flex items-center gap-1.5 px-3 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs transition cursor-pointer border border-slate-200"
           >
             <Home className="w-4 h-4 text-blue-600" />
-            <span>Ganti Role</span>
+            <span className="hidden sm:inline">Ganti Role</span>
           </button>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* Left Column: Mobile-Friendly Form (7 cols) */}
-        <div className="lg:col-span-7 space-y-6">
-          <div className="bg-white border border-slate-200 rounded-xl p-5 sm:p-7 shadow-sm">
-            <div className="flex items-center justify-between pb-4 mb-5 border-b border-slate-100">
-              <h3 className="font-bold text-slate-800 text-base sm:text-lg flex items-center gap-2 underline decoration-blue-500 decoration-2 underline-offset-4">
-                <Truck className="w-5 h-5 text-blue-600" />
-                Input Data Truk &amp; Surat Jalan
-              </h3>
-              <span className="text-xs px-2.5 py-1 rounded bg-slate-100 text-slate-600 font-semibold">
-                1-Click Timestamp
-              </span>
+      {/* Success Confirmation Card (if recently submitted) */}
+      {lastSubmittedTicket && (
+        <div className="bg-emerald-50 border-2 border-emerald-500/60 rounded-2xl p-4 sm:p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 animate-in fade-in">
+          <div className="flex items-center gap-3.5">
+            <div className="w-12 h-12 rounded-xl bg-emerald-600 text-white flex items-center justify-center font-mono font-black text-lg shadow-sm shrink-0">
+              {lastSubmittedTicket.queueNumber}
             </div>
-
-            <form onSubmit={handleSubmit} className="space-y-5">
-              {/* Quick Supplier Chips */}
-              <div className="space-y-1.5">
-                <label className="text-xs text-slate-600 font-bold uppercase tracking-wider flex items-center justify-between">
-                  <span>Pilih Cepat Nama Supplier:</span>
-                </label>
-                <div className="flex flex-wrap gap-1.5">
-                  {quickSuppliers.map((s) => (
-                    <button
-                      type="button"
-                      key={s}
-                      onClick={() => setSupplierName(s)}
-                      className={`text-xs px-2.5 py-1 rounded-md transition cursor-pointer border font-medium ${
-                        supplierName === s
-                          ? 'bg-blue-50 border-blue-500 text-blue-700 font-bold'
-                          : 'bg-slate-50 border-slate-200 text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-                      }`}
-                    >
-                      {s.split(' ')[1] || s}
-                    </button>
-                  ))}
-                </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-black uppercase text-emerald-800 tracking-wider">
+                  Tiket Antrean Diterbitkan
+                </span>
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-200 text-emerald-900 font-bold">
+                  {formatShortTime(lastSubmittedTicket.t1GateIn)} WIB
+                </span>
               </div>
+              <p className="text-sm font-bold text-slate-900 mt-0.5">
+                {lastSubmittedTicket.supplierName} • <span className="font-mono">{lastSubmittedTicket.licensePlate}</span>
+              </p>
+              <p className="text-xs text-slate-600">
+                Driver: <strong>{lastSubmittedTicket.driverName}</strong> ({lastSubmittedTicket.vehicleType})
+              </p>
+            </div>
+          </div>
 
-              {/* Nama Supplier (Required) */}
-              <div className="space-y-1.5">
-                <label htmlFor="input-supplier-name" className="text-xs sm:text-sm font-bold text-slate-700 flex items-center justify-between">
-                  <span>Nama Supplier <span className="text-red-500">*</span></span>
-                </label>
-                <div className="relative">
-                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
-                    <FileText className="w-4 h-4" />
-                  </div>
-                  <input
-                    id="input-supplier-name"
-                    type="text"
-                    required
-                    value={supplierName}
-                    onChange={(e) => setSupplierName(e.target.value)}
-                    placeholder="Contoh: PT Indofood CBP Sukses Makmur"
-                    className="w-full pl-9 pr-3 py-2.5 bg-white border border-slate-300 rounded-lg text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
-                  />
-                </div>
-              </div>
-
-              {/* Driver & Plat Nomor (Required) */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="space-y-1.5">
-                  <label htmlFor="input-driver-name" className="text-xs sm:text-sm font-bold text-slate-700">
-                    Nama Driver <span className="text-red-500">*</span>
-                  </label>
-                  <div className="relative">
-                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
-                      <User className="w-4 h-4" />
-                    </div>
-                    <input
-                      id="input-driver-name"
-                      type="text"
-                      required
-                      value={driverName}
-                      onChange={(e) => setDriverName(e.target.value)}
-                      placeholder="Nama Lengkap Sopir"
-                      className="w-full pl-9 pr-3 py-2.5 bg-white border border-slate-300 rounded-lg text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
-                    />
-                  </div>
-                </div>
-
-                <div className="space-y-1.5">
-                  <label htmlFor="input-license-plate" className="text-xs sm:text-sm font-bold text-slate-700">
-                    Plat Nomor Truk <span className="text-red-500">*</span>
-                  </label>
-                  <div className="relative">
-                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
-                      <Truck className="w-4 h-4" />
-                    </div>
-                    <input
-                      id="input-license-plate"
-                      type="text"
-                      required
-                      value={licensePlate}
-                      onChange={(e) => setLicensePlate(e.target.value.toUpperCase())}
-                      placeholder="B 1234 ABC"
-                      className="w-full pl-9 pr-3 py-2.5 bg-white border border-slate-300 rounded-lg text-slate-900 font-mono uppercase tracking-wider placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Jenis Kendaraan (Select with Standard Lead Time) */}
-              <div className="space-y-1.5">
-                <label htmlFor="select-vehicle-type" className="text-xs sm:text-sm font-bold text-slate-700 flex items-center justify-between">
-                  <span>Jenis Kendaraan &amp; Standar Lead Time <span className="text-red-500">*</span></span>
-                  <span className="text-xs text-blue-600 font-mono font-bold">
-                    Std: {VEHICLE_LEAD_TIMES[vehicleType].minutes} Menit
-                  </span>
-                </label>
-                <select
-                  id="select-vehicle-type"
-                  value={vehicleType}
-                  onChange={(e) => setVehicleType(e.target.value as VehicleType)}
-                  className="w-full px-3 py-2.5 bg-white border border-slate-300 rounded-lg text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm cursor-pointer"
-                >
-                  <option value="Wingbox 20T">Wingbox 20T [120m] - Truk Wingbox Kapasitas Besar 20 Ton</option>
-                  <option value="CDE">CDE [60m] - Colt Diesel Engkel (4 Roda)</option>
-                  <option value="CDD">CDD [120m] - Colt Diesel Double (6 Roda)</option>
-                  <option value="Tronton">Tronton [120m] - Truk Tronton Heavy Duty (10 Roda)</option>
-                  <option value="Pick Up">Pick Up [30m] - Mobil Bak / Blind Van</option>
-                </select>
-
-                <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-600 flex items-center justify-between">
-                  <span>Kapasitas Muatan: <strong className="text-slate-800">{VEHICLE_LEAD_TIMES[vehicleType].capacity}</strong></span>
-                  <span>SOP Bongkar: <strong className="text-emerald-600">{VEHICLE_LEAD_TIMES[vehicleType].minutes} Menit</strong></span>
-                </div>
-              </div>
-
-              {/* No HP Driver & No Surat Jalan (Optional) */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="space-y-1.5">
-                  <label htmlFor="input-driver-phone" className="text-xs sm:text-sm font-bold text-slate-700">
-                    No HP / WhatsApp Driver (Opsional)
-                  </label>
-                  <div className="relative">
-                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
-                      <Phone className="w-4 h-4" />
-                    </div>
-                    <input
-                      id="input-driver-phone"
-                      type="tel"
-                      value={driverPhone}
-                      onChange={(e) => setDriverPhone(e.target.value)}
-                      placeholder="0812-xxxx-xxxx"
-                      className="w-full pl-9 pr-3 py-2.5 bg-white border border-slate-300 rounded-lg text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
-                    />
-                  </div>
-                </div>
-
-                <div className="space-y-1.5">
-                  <label htmlFor="input-surat-jalan" className="text-xs sm:text-sm font-bold text-slate-700">
-                    Nomor Surat Jalan (Opsional)
-                  </label>
-                  <div className="relative">
-                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
-                      <FileText className="w-4 h-4" />
-                    </div>
-                    <input
-                      id="input-surat-jalan"
-                      type="text"
-                      value={suratJalanNumber}
-                      onChange={(e) => setSuratJalanNumber(e.target.value)}
-                      placeholder="SJ-XXXX/2026"
-                      className="w-full pl-9 pr-3 py-2.5 bg-white border border-slate-300 rounded-lg text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Upload / Foto Surat Jalan (File / Camera Input) */}
-              <div className="space-y-2">
-                <label className="text-xs sm:text-sm font-bold text-slate-700 flex items-center justify-between">
-                  <span>Foto / Scan Surat Jalan (Opsional)</span>
-                  {suratJalanPhoto && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSuratJalanPhoto(null);
-                        setPhotoFileName('');
-                      }}
-                      className="text-xs text-red-600 hover:text-red-700 font-semibold flex items-center gap-1 cursor-pointer"
-                    >
-                      <X className="w-3.5 h-3.5" /> Hapus Foto
-                    </button>
-                  )}
-                </label>
-
-                {suratJalanPhoto ? (
-                  <div className="relative rounded-lg overflow-hidden border border-slate-200 bg-slate-50 p-2 flex items-center gap-3">
-                    <img 
-                      src={suratJalanPhoto} 
-                      alt="Preview Surat Jalan" 
-                      className="w-16 h-16 object-cover rounded-lg border border-slate-300"
-                    />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs font-bold text-slate-800 truncate">{photoFileName || 'Surat Jalan Foto'}</p>
-                      <p className="text-[11px] text-emerald-600 font-semibold flex items-center gap-1 mt-0.5">
-                        <CheckCircle2 className="w-3 h-3" /> Siap dilampirkan
-                      </p>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    {/* Manual Upload */}
-                    <button
-                      type="button"
-                      onClick={() => fileInputRef.current?.click()}
-                      className="flex items-center justify-center gap-2 p-3 rounded-lg border border-dashed border-slate-300 bg-slate-50 hover:bg-slate-100 hover:border-slate-400 text-slate-600 transition cursor-pointer text-xs font-semibold"
-                    >
-                      <Upload className="w-4 h-4 text-blue-600" />
-                      <span>Upload Dokumen (PDF/JPG)</span>
-                    </button>
-                    <input 
-                      type="file" 
-                      ref={fileInputRef} 
-                      onChange={handlePhotoUpload} 
-                      accept="image/*,.pdf" 
-                      className="hidden" 
-                    />
-
-                    {/* Camera snapshot simulation */}
-                    <button
-                      type="button"
-                      onClick={handleCaptureSamplePhoto}
-                      className="flex items-center justify-center gap-2 p-3 rounded-lg border border-dashed border-blue-300 bg-blue-50/50 hover:bg-blue-50 text-blue-700 transition cursor-pointer text-xs font-semibold"
-                    >
-                      <Camera className="w-4 h-4 text-blue-600" />
-                      <span>Gunakan Kamera / Scan Cepat</span>
-                    </button>
-                  </div>
-                )}
-              </div>
-
-              {/* Action Submit Button */}
-              <div className="pt-2">
-                <button
-                  type="submit"
-                  id="btn-submit-kedatangan"
-                  className="w-full py-3.5 px-6 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-bold text-base shadow-sm flex items-center justify-center gap-2 transition cursor-pointer active:scale-[0.99]"
-                >
-                  <CheckCircle2 className="w-5 h-5" />
-                  <span>Submit Kedatangan (Catat T1 Gate-In)</span>
-                  <ArrowRight className="w-4 h-4 ml-1" />
-                </button>
-                <p className="text-[11px] text-center text-slate-400 mt-2">
-                  Timestamp T1 dicatat otomatis dengan waktu server saat ini.
-                </p>
-              </div>
-            </form>
+          <div className="text-xs text-emerald-800 bg-white/80 px-3 py-2 rounded-xl border border-emerald-200 text-center sm:text-right w-full sm:w-auto">
+            <span className="block font-bold">Status: Menunggu Cek PO Admin</span>
+            <span className="text-[11px] text-slate-500">Berikan nomor antrean <strong>{lastSubmittedTicket.queueNumber}</strong> ke supir</span>
           </div>
         </div>
+      )}
 
-        {/* Right Column: Digital Gate Pass Preview & Live Gate-In Queue (5 cols) */}
-        <div className="lg:col-span-5 space-y-6">
-          {/* Last Submitted Gate Pass Ticket Card */}
-          {lastSubmittedTicket ? (
-            <div className="bg-white border-2 border-emerald-500/50 rounded-xl p-5 shadow-sm relative overflow-hidden">
-              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-                <div className="flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping" />
-                  <span className="text-xs font-bold uppercase tracking-wider text-emerald-700">
-                    Karcis Antrean Gate-In
-                  </span>
-                </div>
+      {/* Main Single Card Fast-Entry Form */}
+      <div className="bg-white border border-slate-200 rounded-2xl p-5 sm:p-7 shadow-xs">
+        <div className="flex items-center justify-between pb-4 mb-5 border-b border-slate-100">
+          <h3 className="font-extrabold text-slate-900 text-base sm:text-lg flex items-center gap-2">
+            <Truck className="w-5 h-5 text-blue-600" />
+            <span>Formulir Kedatangan Armada</span>
+          </h3>
+          <span className="text-xs px-2.5 py-1 rounded-full bg-blue-50 text-blue-700 font-bold border border-blue-200 flex items-center gap-1">
+            <Clock className="w-3 h-3 text-blue-600" />
+            <span>Auto Timestamp T1</span>
+          </span>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-5">
+          {/* Quick Supplier Chips */}
+          <div className="space-y-1.5">
+            <label className="text-xs text-slate-500 font-bold uppercase tracking-wider flex items-center justify-between">
+              <span>Pilihan Cepat Supplier:</span>
+              <span className="text-[10px] text-slate-400 font-normal">Klik untuk mengisi otomatis</span>
+            </label>
+            <div className="flex flex-wrap gap-1.5">
+              {quickSuppliers.map((s) => (
                 <button
-                  onClick={() => window.print()}
-                  className="text-xs px-2.5 py-1 rounded-md bg-slate-100 hover:bg-slate-200 text-slate-700 flex items-center gap-1.5 transition cursor-pointer font-semibold"
-                  title="Cetak Karcis"
+                  type="button"
+                  key={s}
+                  onClick={() => setSupplierName(s)}
+                  className={`text-xs px-2.5 py-1.5 rounded-lg transition cursor-pointer border font-medium ${
+                    supplierName === s
+                      ? 'bg-blue-600 border-blue-600 text-white font-bold shadow-xs'
+                      : 'bg-slate-50 border-slate-200 text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+                  }`}
                 >
-                  <Printer className="w-3.5 h-3.5" />
-                  <span>Cetak</span>
+                  {s.replace(/^(PT|CV)\s+/, '')}
                 </button>
-              </div>
-
-              <div className="py-4 text-center space-y-1">
-                <p className="text-xs text-slate-500 font-medium">Nomor Antrean Bongkaran</p>
-                <h4 className="text-4xl font-black text-emerald-600 font-mono tracking-tight">
-                  {lastSubmittedTicket.queueNumber}
-                </h4>
-                <p className="text-xs font-mono text-slate-500">
-                  Waktu Masuk (T1): {formatShortTime(lastSubmittedTicket.t1GateIn)} WIB
-                </p>
-              </div>
-
-              <div className="bg-slate-50 rounded-lg p-3.5 border border-slate-200 text-xs space-y-2">
-                <div className="flex justify-between">
-                  <span className="text-slate-500">Supplier:</span>
-                  <span className="font-bold text-slate-800 text-right truncate ml-2">{lastSubmittedTicket.supplierName}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-500">Driver / No Plat:</span>
-                  <span className="font-mono text-slate-700 font-semibold">{lastSubmittedTicket.driverName} ({lastSubmittedTicket.licensePlate})</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-500">Jenis Armada:</span>
-                  <span className="text-blue-600 font-bold">{lastSubmittedTicket.vehicleType}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-500">Lead Time Maksimal:</span>
-                  <span className="text-orange-600 font-bold">{VEHICLE_LEAD_TIMES[lastSubmittedTicket.vehicleType].minutes} Menit</span>
-                </div>
-              </div>
-
-              <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between">
-                <div className="flex items-center gap-2 text-[11px] text-slate-500">
-                  <QrCode className="w-6 h-6 text-slate-400" />
-                  <span>Serahkan karcis ini ke Admin Gudang untuk cek PO PPIC.</span>
-                </div>
-                <button
-                  onClick={() => {
-                    setActiveRole('admin');
-                  }}
-                  className="text-xs font-bold text-blue-600 hover:text-blue-700 flex items-center gap-1 cursor-pointer whitespace-nowrap"
-                >
-                  Ke Admin <ArrowRight className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            </div>
-          ) : (
-            <div className="bg-white border border-dashed border-slate-300 rounded-xl p-6 text-center text-slate-500 space-y-2">
-              <QrCode className="w-10 h-10 mx-auto text-slate-400" />
-              <p className="text-xs font-medium">Karcis digital akan otomatis muncul di sini setelah Submit Kedatangan.</p>
-            </div>
-          )}
-
-          {/* Today's Recent Gate Entries List */}
-          <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm space-y-4">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-              <div className="flex items-center gap-2">
-                <Clock className="w-4 h-4 text-blue-600" />
-                <h4 className="font-bold text-slate-800 text-sm">Daftar Kedatangan Hari Ini</h4>
-              </div>
-              <span className="text-xs text-slate-500 font-mono font-bold">{records.length} unit</span>
-            </div>
-
-            <div className="space-y-2 max-h-[380px] overflow-y-auto pr-1">
-              {todayEntries.map((rec) => (
-                <div
-                  key={rec.id}
-                  onClick={() => setSelectedRecord(rec)}
-                  className="p-3 bg-slate-50 hover:bg-blue-50/40 border border-slate-200 rounded-lg transition cursor-pointer flex items-center justify-between gap-3 group"
-                >
-                  <div className="space-y-0.5 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="font-mono font-extrabold text-xs text-blue-600">
-                        {rec.queueNumber}
-                      </span>
-                      <span className="text-xs text-slate-800 font-bold truncate">
-                        {rec.supplierName}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2 text-[11px] text-slate-500">
-                      <span className="font-mono text-slate-700">{rec.licensePlate}</span>
-                      <span>•</span>
-                      <span>{rec.vehicleType}</span>
-                    </div>
-                  </div>
-
-                  <div className="text-right flex flex-col items-end shrink-0">
-                    <span className="text-xs font-mono text-slate-600">
-                      {formatShortTime(rec.t1GateIn)}
-                    </span>
-                    <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-black uppercase mt-1 ${
-                      rec.status === 'MENUNGGU_VERIFIKASI_PO'
-                        ? 'bg-orange-100 text-orange-700'
-                        : rec.status === 'PO_READY_DOCK_ASSIGNED'
-                        ? 'bg-blue-100 text-blue-700'
-                        : rec.status === 'SEDANG_BONGKAR'
-                        ? 'bg-indigo-100 text-indigo-700'
-                        : 'bg-emerald-100 text-emerald-700'
-                    }`}>
-                      {rec.status === 'MENUNGGU_VERIFIKASI_PO' ? 'Menunggu PO' :
-                       rec.status === 'PO_READY_DOCK_ASSIGNED' ? 'Ready Dock' :
-                       rec.status === 'SEDANG_BONGKAR' ? 'Bongkar' : 'Selesai'}
-                    </span>
-                  </div>
-                </div>
               ))}
             </div>
           </div>
-        </div>
+
+          {/* 1. Nama Supplier (Required) */}
+          <div className="space-y-1.5">
+            <label htmlFor="input-supplier-name" className="text-xs sm:text-sm font-bold text-slate-800 flex items-center justify-between">
+              <span>Nama Supplier <span className="text-red-500">*</span></span>
+            </label>
+            <div className="relative">
+              <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
+                <FileText className="w-4 h-4" />
+              </div>
+              <input
+                id="input-supplier-name"
+                type="text"
+                required
+                value={supplierName}
+                onChange={(e) => setSupplierName(e.target.value)}
+                placeholder="Contoh: PT Indofood CBP Sukses Makmur"
+                className="w-full pl-10 pr-4 py-3 bg-white border border-slate-300 rounded-xl text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm font-medium"
+              />
+            </div>
+          </div>
+
+          {/* 2 & 3. Driver & Plat Nomor (Required) */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <label htmlFor="input-driver-name" className="text-xs sm:text-sm font-bold text-slate-800">
+                Nama Driver <span className="text-red-500">*</span>
+              </label>
+              <div className="relative">
+                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
+                  <User className="w-4 h-4" />
+                </div>
+                <input
+                  id="input-driver-name"
+                  type="text"
+                  required
+                  value={driverName}
+                  onChange={(e) => setDriverName(e.target.value)}
+                  placeholder="Nama Lengkap Sopir"
+                  className="w-full pl-10 pr-4 py-3 bg-white border border-slate-300 rounded-xl text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm font-medium"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <label htmlFor="input-license-plate" className="text-xs sm:text-sm font-bold text-slate-800">
+                Nomor Plat Kendaraan <span className="text-red-500">*</span>
+              </label>
+              <div className="relative">
+                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
+                  <Truck className="w-4 h-4" />
+                </div>
+                <input
+                  id="input-license-plate"
+                  type="text"
+                  required
+                  value={licensePlate}
+                  onChange={(e) => setLicensePlate(e.target.value.toUpperCase())}
+                  placeholder="B 1234 ABC"
+                  className="w-full pl-10 pr-4 py-3 bg-white border border-slate-300 rounded-xl text-slate-900 font-mono uppercase tracking-wider placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm font-bold"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* 4. Jenis Kendaraan / Lead Time (Select) */}
+          <div className="space-y-1.5">
+            <label htmlFor="select-vehicle-type" className="text-xs sm:text-sm font-bold text-slate-800 flex items-center justify-between">
+              <span>Jenis Kendaraan &amp; Standar Lead Time <span className="text-red-500">*</span></span>
+              <span className="text-xs text-blue-600 font-mono font-bold">
+                SOP Bongkar: {VEHICLE_LEAD_TIMES[vehicleType].minutes} Menit
+              </span>
+            </label>
+            <select
+              id="select-vehicle-type"
+              value={vehicleType}
+              onChange={(e) => setVehicleType(e.target.value as VehicleType)}
+              className="w-full px-3.5 py-3 bg-white border border-slate-300 rounded-xl text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm font-medium cursor-pointer"
+            >
+              <option value="Wingbox 20T">Wingbox 20T — (SOP: 120 Menit / 20 Ton)</option>
+              <option value="CDE">CDE (Colt Diesel Engkel / 4 Roda) — (SOP: 60 Menit)</option>
+              <option value="CDD">CDD (Colt Diesel Double / 6 Roda) — (SOP: 120 Menit)</option>
+              <option value="Tronton">Tronton (Truk Heavy Duty / 10 Roda) — (SOP: 120 Menit)</option>
+              <option value="Pick Up">Pick Up / Blind Van — (SOP: 30 Menit)</option>
+            </select>
+          </div>
+
+          {/* 5. Nomor HP Driver (Optional) */}
+          <div className="space-y-1.5">
+            <label htmlFor="input-driver-phone" className="text-xs sm:text-sm font-bold text-slate-800">
+              Nomor HP Driver <span className="text-slate-400 font-normal">(Opsional)</span>
+            </label>
+            <div className="relative">
+              <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
+                <Phone className="w-4 h-4" />
+              </div>
+              <input
+                id="input-driver-phone"
+                type="tel"
+                value={driverPhone}
+                onChange={(e) => setDriverPhone(e.target.value)}
+                placeholder="Contoh: 0812-3456-7890"
+                className="w-full pl-10 pr-4 py-3 bg-white border border-slate-300 rounded-xl text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm font-medium"
+              />
+            </div>
+          </div>
+
+          {/* Action Submit Button */}
+          <div className="pt-3">
+            <button
+              type="submit"
+              id="btn-submit-kedatangan"
+              className="w-full py-4 px-6 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-extrabold text-base shadow-sm hover:shadow-md flex items-center justify-center gap-2 transition cursor-pointer active:scale-[0.99]"
+            >
+              <CheckCircle2 className="w-5 h-5" />
+              <span>Submit Kedatangan (T1)</span>
+              <ArrowRight className="w-4 h-4 ml-1" />
+            </button>
+            <p className="text-[11px] text-center text-slate-500 mt-2.5">
+              Sistem akan otomatis mencatat timestamp T1 dan menerbitkan nomor antrean resmi.
+            </p>
+          </div>
+        </form>
       </div>
     </div>
   );

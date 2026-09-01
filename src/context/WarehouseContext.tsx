@@ -1,10 +1,11 @@
-import React, { createContext, useContext, useState, useEffect, useMemo, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useMemo, ReactNode, useCallback, useRef } from 'react';
 import { UnloadingRecord, RoleType, AppViewType, AuthUser, DEMO_ACCOUNTS, OperationalStats, GoodsCondition, VehicleType } from '../types';
 import { INITIAL_UNLOADING_RECORDS } from '../data/initialData';
 import { calculateLeadTime } from '../utils/timeUtils';
 
 const STORAGE_KEY = 'warehouse_unloading_system_v1';
 const AUTH_STORAGE_KEY = 'warehouse_unloading_auth_user_v1';
+const SYNC_CHANNEL_NAME = 'sim_bongkar_sync_channel';
 
 interface WarehouseContextType {
   records: UnloadingRecord[];
@@ -17,6 +18,9 @@ interface WarehouseContextType {
   stats: OperationalStats;
   soundEnabled: boolean;
   setSoundEnabled: (enabled: boolean) => void;
+  isSyncing: boolean;
+  lastSyncTime: string | null;
+  refreshDataFromServer: () => Promise<void>;
   
   // Auth Modal & Handlers
   isAuthModalOpen: boolean;
@@ -24,7 +28,6 @@ interface WarehouseContextType {
   openAuthModal: (role: RoleType) => void;
   closeAuthModal: () => void;
   loginWithCredentials: (role: RoleType, identifier: string, secret?: string) => { success: boolean; message?: string };
-  quickDemoLogin: (role: RoleType) => void;
   logout: () => void;
   navigateToRole: (role: RoleType) => void;
   returnToPortal: () => void;
@@ -83,7 +86,8 @@ export const WarehouseProvider: React.FC<{ children: ReactNode }> = ({ children 
     try {
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
-        return JSON.parse(saved);
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
       }
     } catch {
       // Fallback
@@ -113,6 +117,120 @@ export const WarehouseProvider: React.FC<{ children: ReactNode }> = ({ children 
   const [selectedRecord, setSelectedRecord] = useState<UnloadingRecord | null>(null);
   const [isWallboardOpen, setIsWallboardOpen] = useState<boolean>(false);
   const [isAiModalOpen, setIsAiModalOpen] = useState<boolean>(false);
+  const [isSyncing, setIsSyncing] = useState<boolean>(false);
+  const [lastSyncTime, setLastSyncTime] = useState<string | null>(null);
+
+  const broadcastChannelRef = useRef<BroadcastChannel | null>(null);
+  const lastServerVersionRef = useRef<number>(0);
+  const isInitialMountRef = useRef<boolean>(true);
+
+  // Synchronize with BroadcastChannel for instant same-browser cross-tab sync
+  useEffect(() => {
+    try {
+      if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+        const channel = new BroadcastChannel(SYNC_CHANNEL_NAME);
+        broadcastChannelRef.current = channel;
+
+        channel.onmessage = (event) => {
+          if (event.data?.type === 'SYNC_RECORDS' && Array.isArray(event.data.records)) {
+            setRecords(event.data.records);
+            setLastSyncTime(new Date().toLocaleTimeString('id-ID'));
+          }
+        };
+
+        return () => {
+          channel.close();
+        };
+      }
+    } catch (e) {
+      console.warn('BroadcastChannel not supported in current environment', e);
+    }
+  }, []);
+
+  const broadcastRecords = useCallback((newRecords: UnloadingRecord[]) => {
+    try {
+      if (broadcastChannelRef.current) {
+        broadcastChannelRef.current.postMessage({
+          type: 'SYNC_RECORDS',
+          records: newRecords,
+          timestamp: Date.now(),
+        });
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  // Save to backend API helper
+  const syncRecordsToBackend = useCallback(async (newRecords: UnloadingRecord[]) => {
+    try {
+      setIsSyncing(true);
+      await fetch('/api/unloading-records', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ records: newRecords }),
+      });
+      setLastSyncTime(new Date().toLocaleTimeString('id-ID'));
+    } catch (err) {
+      console.warn('Backend sync failed (running in offline/client mode):', err);
+    } finally {
+      setIsSyncing(false);
+    }
+  }, []);
+
+  // Sync single item to backend API
+  const syncItemToBackend = useCallback(async (record: UnloadingRecord) => {
+    try {
+      await fetch('/api/unloading-records/item', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ record }),
+      });
+      setLastSyncTime(new Date().toLocaleTimeString('id-ID'));
+    } catch (err) {
+      console.warn('Backend item sync error:', err);
+    }
+  }, []);
+
+  // Fetch all records from backend
+  const refreshDataFromServer = useCallback(async () => {
+    try {
+      const resp = await fetch('/api/unloading-records');
+      if (resp.ok) {
+        const data = await resp.json();
+        if (data.success && Array.isArray(data.records)) {
+          // If server version is newer or initial load
+          if (data.version !== lastServerVersionRef.current || isInitialMountRef.current) {
+            lastServerVersionRef.current = data.version;
+            
+            // If server has records, accept them
+            if (data.records.length > 0) {
+              setRecords(data.records);
+            } else if (isInitialMountRef.current && records.length > 0) {
+              // If server was fresh restarted, push current records to server
+              syncRecordsToBackend(records);
+            }
+            setLastSyncTime(new Date().toLocaleTimeString('id-ID'));
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('Polling /api/unloading-records skipped or offline:', err);
+    } finally {
+      isInitialMountRef.current = false;
+    }
+  }, [records, syncRecordsToBackend]);
+
+  // Initial fetch on mount + Polling interval every 3 seconds for real-time cross-device sync
+  useEffect(() => {
+    refreshDataFromServer();
+
+    const pollInterval = setInterval(() => {
+      refreshDataFromServer();
+    }, 3000);
+
+    return () => clearInterval(pollInterval);
+  }, [refreshDataFromServer]);
 
   // Sync to localStorage
   useEffect(() => {
@@ -178,12 +296,11 @@ export const WarehouseProvider: React.FC<{ children: ReactNode }> = ({ children 
         closeAuthModal();
         return { success: true };
       }
-      return { success: false, message: 'Username atau Password Admin salah! (Demo: admin / admin123)' };
+      return { success: false, message: 'Username atau Password Admin salah!' };
     }
 
     if (role === 'operator') {
       const demo = DEMO_ACCOUNTS.operator;
-      // Allow PIN login or username/password
       if (cleanSecret === demo.pin || (cleanId === demo.username && cleanSecret === demo.password)) {
         const user: AuthUser = {
           role: 'operator',
@@ -197,7 +314,7 @@ export const WarehouseProvider: React.FC<{ children: ReactNode }> = ({ children 
         closeAuthModal();
         return { success: true };
       }
-      return { success: false, message: 'PIN atau Kredensial Operator salah! (Demo: PIN 1234 atau operator / operator123)' };
+      return { success: false, message: 'PIN atau Kredensial Operator salah!' };
     }
 
     if (role === 'spv') {
@@ -215,33 +332,10 @@ export const WarehouseProvider: React.FC<{ children: ReactNode }> = ({ children 
         closeAuthModal();
         return { success: true };
       }
-      return { success: false, message: 'Username atau Password SPV salah! (Demo: spv / spv123)' };
+      return { success: false, message: 'Username atau Password SPV salah!' };
     }
 
     return { success: false, message: 'Role tidak valid.' };
-  };
-
-  const quickDemoLogin = (role: RoleType) => {
-    if (role === 'security') {
-      setActiveRole('security');
-      setActiveView('security');
-      closeAuthModal();
-      return;
-    }
-
-    const demo = DEMO_ACCOUNTS[role];
-    if (demo) {
-      const user: AuthUser = {
-        role,
-        username: demo.username,
-        name: demo.name,
-        loggedInAt: new Date().toISOString(),
-      };
-      setAuthUser(user);
-      setActiveRole(role);
-      setActiveView(role);
-      closeAuthModal();
-    }
   };
 
   const logout = () => {
@@ -260,7 +354,6 @@ export const WarehouseProvider: React.FC<{ children: ReactNode }> = ({ children 
       return;
     }
 
-    // Check if user is logged in as this role or has active session
     if (authUser && (authUser.role === role || authUser.role === 'spv')) {
       setActiveRole(role);
       setActiveView(role);
@@ -337,7 +430,16 @@ export const WarehouseProvider: React.FC<{ children: ReactNode }> = ({ children 
     suratJalanNumber?: string;
     suratJalanPhoto?: string;
   }): UnloadingRecord => {
-    const nextSeqNumber = records.length + 1;
+    // Determine next sequential queue number #Q-xxx
+    let maxNum = 0;
+    records.forEach((r) => {
+      const match = r.queueNumber?.match(/#Q-(\d+)/i);
+      if (match) {
+        const n = parseInt(match[1], 10);
+        if (!isNaN(n) && n > maxNum) maxNum = n;
+      }
+    });
+    const nextSeqNumber = maxNum + 1;
     const queueNumber = `#Q-${String(nextSeqNumber).padStart(3, '0')}`;
     const nowIso = new Date().toISOString();
     const todayDate = nowIso.split('T')[0];
@@ -357,7 +459,10 @@ export const WarehouseProvider: React.FC<{ children: ReactNode }> = ({ children 
       status: 'MENUNGGU_VERIFIKASI_PO',
     };
 
-    setRecords((prev) => [newRecord, ...prev]);
+    const updated = [newRecord, ...records];
+    setRecords(updated);
+    broadcastRecords(updated);
+    syncItemToBackend(newRecord);
     return newRecord;
   };
 
@@ -370,41 +475,51 @@ export const WarehouseProvider: React.FC<{ children: ReactNode }> = ({ children 
     suratJalanPhoto?: string;
   }) => {
     const nowIso = new Date().toISOString();
-    setRecords((prev) =>
-      prev.map((item) => {
-        if (item.id === id) {
-          return {
-            ...item,
-            t2PoReady: nowIso,
-            poNumber: data.poNumber.trim(),
-            assignedDock: data.assignedDock.trim(),
-            adminNotesStep1: data.adminNotes?.trim(),
-            adminNameStep1: data.adminName?.trim() || authUser?.name || 'Admin Gudang',
-            suratJalanPhoto: data.suratJalanPhoto || item.suratJalanPhoto,
-            status: 'PO_READY_DOCK_ASSIGNED',
-          };
-        }
-        return item;
-      })
-    );
+    let updatedItem: UnloadingRecord | null = null;
+
+    const updated = records.map((item) => {
+      if (item.id === id) {
+        updatedItem = {
+          ...item,
+          t2PoReady: nowIso,
+          poNumber: data.poNumber.trim(),
+          assignedDock: data.assignedDock.trim(),
+          adminNotesStep1: data.adminNotes?.trim(),
+          adminNameStep1: data.adminName?.trim() || authUser?.name || 'Admin Gudang',
+          suratJalanPhoto: data.suratJalanPhoto || item.suratJalanPhoto,
+          status: 'PO_READY_DOCK_ASSIGNED',
+        };
+        return updatedItem;
+      }
+      return item;
+    });
+
+    setRecords(updated);
+    broadcastRecords(updated);
+    if (updatedItem) syncItemToBackend(updatedItem);
   };
 
   // Action: Operator Step (Start Unloading -> T3)
   const startUnloading = (id: string, operatorName: string) => {
     const nowIso = new Date().toISOString();
-    setRecords((prev) =>
-      prev.map((item) => {
-        if (item.id === id) {
-          return {
-            ...item,
-            t3UnloadingStart: nowIso,
-            operatorName: operatorName.trim() || authUser?.name || 'Operator Dock',
-            status: 'SEDANG_BONGKAR',
-          };
-        }
-        return item;
-      })
-    );
+    let updatedItem: UnloadingRecord | null = null;
+
+    const updated = records.map((item) => {
+      if (item.id === id) {
+        updatedItem = {
+          ...item,
+          t3UnloadingStart: nowIso,
+          operatorName: operatorName.trim() || authUser?.name || 'Operator Dock',
+          status: 'SEDANG_BONGKAR',
+        };
+        return updatedItem;
+      }
+      return item;
+    });
+
+    setRecords(updated);
+    broadcastRecords(updated);
+    if (updatedItem) syncItemToBackend(updatedItem);
   };
 
   // Action: Operator Step (Finish Unloading -> T4 Operator & Send Verification to Admin)
@@ -414,26 +529,31 @@ export const WarehouseProvider: React.FC<{ children: ReactNode }> = ({ children 
     photos?: string[];
   }) => {
     const nowIso = new Date().toISOString();
-    setRecords((prev) =>
-      prev.map((item) => {
-        if (item.id === id) {
-          const combinedPhotos = [
-            ...(item.goodsPhotos || []),
-            ...(data.photos || []),
-          ];
-          return {
-            ...item,
-            t4Operator: nowIso,
-            operatorName: data.operatorName?.trim() || item.operatorName || authUser?.name || 'Operator Dock',
-            operatorNotes: data.operatorNotes?.trim() || item.operatorNotes,
-            operatorPhotos: data.photos && data.photos.length > 0 ? data.photos : item.operatorPhotos,
-            goodsPhotos: combinedPhotos.length > 0 ? combinedPhotos : item.goodsPhotos,
-            status: 'WAITING_ADMIN_VERIFICATION',
-          };
-        }
-        return item;
-      })
-    );
+    let updatedItem: UnloadingRecord | null = null;
+
+    const updated = records.map((item) => {
+      if (item.id === id) {
+        const combinedPhotos = [
+          ...(item.goodsPhotos || []),
+          ...(data.photos || []),
+        ];
+        updatedItem = {
+          ...item,
+          t4Operator: nowIso,
+          operatorName: data.operatorName?.trim() || item.operatorName || authUser?.name || 'Operator Dock',
+          operatorNotes: data.operatorNotes?.trim() || item.operatorNotes,
+          operatorPhotos: data.photos && data.photos.length > 0 ? data.photos : item.operatorPhotos,
+          goodsPhotos: combinedPhotos.length > 0 ? combinedPhotos : item.goodsPhotos,
+          status: 'WAITING_ADMIN_VERIFICATION',
+        };
+        return updatedItem;
+      }
+      return item;
+    });
+
+    setRecords(updated);
+    broadcastRecords(updated);
+    if (updatedItem) syncItemToBackend(updatedItem);
   };
 
   // Action: Admin Step 2 (Finalize Unloading -> T4 Final)
@@ -445,39 +565,52 @@ export const WarehouseProvider: React.FC<{ children: ReactNode }> = ({ children 
     adminName?: string;
   }) => {
     const nowIso = new Date().toISOString();
-    setRecords((prev) =>
-      prev.map((item) => {
-        if (item.id === id) {
-          return {
-            ...item,
-            t4UnloadingFinish: nowIso,
-            operatorCount: data.operatorCount,
-            goodsCondition: data.goodsCondition,
-            adminFinalNotes: data.adminFinalNotes?.trim(),
-            goodsPhotos: data.goodsPhotos && data.goodsPhotos.length > 0 ? data.goodsPhotos : item.goodsPhotos,
-            adminNameStep2: data.adminName?.trim() || authUser?.name || 'Admin Gudang',
-            status: 'SELESAI_BONGKAR',
-          };
-        }
-        return item;
-      })
-    );
+    let updatedItem: UnloadingRecord | null = null;
+
+    const updated = records.map((item) => {
+      if (item.id === id) {
+        updatedItem = {
+          ...item,
+          t4UnloadingFinish: nowIso,
+          operatorCount: data.operatorCount,
+          goodsCondition: data.goodsCondition,
+          adminFinalNotes: data.adminFinalNotes?.trim(),
+          goodsPhotos: data.goodsPhotos && data.goodsPhotos.length > 0 ? data.goodsPhotos : item.goodsPhotos,
+          adminNameStep2: data.adminName?.trim() || authUser?.name || 'Admin Gudang',
+          status: 'SELESAI_BONGKAR',
+        };
+        return updatedItem;
+      }
+      return item;
+    });
+
+    setRecords(updated);
+    broadcastRecords(updated);
+    if (updatedItem) syncItemToBackend(updatedItem);
   };
 
   // Action: Delete
   const deleteRecord = (id: string) => {
-    setRecords((prev) => prev.filter((r) => r.id !== id));
+    const updated = records.filter((r) => r.id !== id);
+    setRecords(updated);
+    broadcastRecords(updated);
     if (selectedRecord?.id === id) setSelectedRecord(null);
+
+    fetch(`/api/unloading-records/${id}`, { method: 'DELETE' }).catch((err) =>
+      console.warn('Backend delete sync error:', err)
+    );
   };
 
-  // Action: Reset Demo
+  // Action: Reset Clean Data
   const resetToDemoData = () => {
-    setRecords(INITIAL_UNLOADING_RECORDS);
+    setRecords([]);
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(INITIAL_UNLOADING_RECORDS));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify([]));
     } catch {
       // ignore
     }
+    syncRecordsToBackend([]);
+    broadcastRecords([]);
   };
 
   return (
@@ -493,12 +626,14 @@ export const WarehouseProvider: React.FC<{ children: ReactNode }> = ({ children 
         stats,
         soundEnabled,
         setSoundEnabled,
+        isSyncing,
+        lastSyncTime,
+        refreshDataFromServer,
         isAuthModalOpen,
         authModalRole,
         openAuthModal,
         closeAuthModal,
         loginWithCredentials,
-        quickDemoLogin,
         logout,
         navigateToRole,
         returnToPortal,
@@ -529,4 +664,3 @@ export const useWarehouse = () => {
   }
   return context;
 };
-

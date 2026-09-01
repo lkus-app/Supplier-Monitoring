@@ -11,17 +11,14 @@ import {
   Clock, 
   Truck, 
   CheckCircle2, 
-  AlertTriangle, 
   Sparkles, 
   Tv, 
-  KeyRound, 
   LogIn, 
   UserCheck,
   HardDrive
 } from 'lucide-react';
 import { useWarehouse } from '../context/WarehouseContext';
-import { DEMO_ACCOUNTS, RoleType } from '../types';
-import { formatShortTime } from '../utils/timeUtils';
+import { RoleType } from '../types';
 import { GoogleDriveModal } from './GoogleDriveModal';
 
 export const LandingPortal: React.FC = () => {
@@ -30,10 +27,8 @@ export const LandingPortal: React.FC = () => {
     authUser, 
     stats, 
     currentTime, 
-    quickDemoLogin, 
     setIsWallboardOpen, 
     setIsAiModalOpen,
-    openAuthModal,
     logout 
   } = useWarehouse();
 
@@ -53,13 +48,12 @@ export const LandingPortal: React.FC = () => {
     bgBadge: string;
     btnClass: string;
     features: string[];
-    demoAccountText: string;
   }[] = [
     {
       id: 'security',
       title: 'Pos Security Gerbang',
       roleLabel: 'SECURITY GATE PASS',
-      subtitle: 'Pencatatan kedatangan armada truk, supir, foto surat jalan, & cetak tiket antrean (T1).',
+      subtitle: 'Pencatatan kedatangan armada truk dan penyerahan nomor antrean fisik (T1).',
       icon: <ShieldCheck className="w-8 h-8 text-blue-600" />,
       isProtected: false,
       badge: 'Akses Terbuka • Tanpa Login',
@@ -71,10 +65,9 @@ export const LandingPortal: React.FC = () => {
       features: [
         'Form input kedatangan cepat (Mobile Friendly)',
         'Auto Timestamp Gate In (T1)',
-        'Cetak & scan tiket antrean fisik',
-        'Unggah foto bukti Surat Jalan'
+        'Penetapan nomor antrean otomatis #Q-xxx',
+        'Validasi data supir dan plat nomor'
       ],
-      demoAccountText: 'Langsung Masuk (No Password Needed)'
     },
     {
       id: 'admin',
@@ -90,12 +83,11 @@ export const LandingPortal: React.FC = () => {
       bgBadge: 'bg-orange-50 text-orange-700',
       btnClass: 'bg-orange-600 hover:bg-orange-700 text-white',
       features: [
-        'Tahap 1: Verifikasi PO & Assign Dock (T2)',
+        'Tahap 1: Verifikasi PO & Assign Zona Dock (T2)',
         'Tahap 2: Input Manpower & Cek Kondisi (T4)',
         'Audit trail dokumen & foto ketidaksesuaian',
         'Status serah terima real-time'
       ],
-      demoAccountText: `Demo: ${DEMO_ACCOUNTS.admin.username} / ${DEMO_ACCOUNTS.admin.password}`
     },
     {
       id: 'operator',
@@ -104,7 +96,7 @@ export const LandingPortal: React.FC = () => {
       subtitle: 'Panel layar sentuh kru dock untuk memulai eksekusi bongkar fisik (T3) & monitoring stopwatch SOP.',
       icon: <HardHat className="w-8 h-8 text-purple-600" />,
       isProtected: true,
-      badge: 'Perlu Login / Quick PIN',
+      badge: 'Perlu Login / PIN',
       badgeColor: 'text-purple-800 bg-purple-50 border-purple-200',
       colorAccent: 'purple',
       borderHover: 'hover:border-purple-500 hover:shadow-purple-500/10',
@@ -113,10 +105,9 @@ export const LandingPortal: React.FC = () => {
       features: [
         'Tombol besar "Mulai Bongkar" (T3)',
         'Live running stopwatch vs Standar SOP',
-        'Filter tampilan per loading dock (01-05)',
+        'Filter tampilan per zona loading dock',
         'Peringatan otomatis jika melebihi batas waktu'
       ],
-      demoAccountText: `Demo PIN: ${DEMO_ACCOUNTS.operator.pin} atau ${DEMO_ACCOUNTS.operator.username}`
     },
     {
       id: 'spv',
@@ -132,12 +123,11 @@ export const LandingPortal: React.FC = () => {
       bgBadge: 'bg-emerald-50 text-emerald-700',
       btnClass: 'bg-emerald-600 hover:bg-emerald-700 text-white',
       features: [
-        '4 Kartu ringkasan metrik operasional',
+        'Ringkasan metrik operasional real-time',
         'Live table monitoring antrean lengkap',
-        'Ekspor laporan audit ke CSV / Excel & Cetak PDF',
+        'Ekspor laporan audit ke CSV & Cetak PDF',
         'AI Copilot & TV Wallboard Fullscreen'
       ],
-      demoAccountText: `Demo: ${DEMO_ACCOUNTS.spv.username} / ${DEMO_ACCOUNTS.spv.password}`
     }
   ];
 
@@ -339,8 +329,8 @@ export const LandingPortal: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* Card Actions & Demo info */}
-                  <div className="pt-6 mt-4 border-t border-slate-100 space-y-3">
+                  {/* Card Actions */}
+                  <div className="pt-6 mt-4 border-t border-slate-100">
                     <button
                       onClick={() => navigateToRole(card.id)}
                       id={`btn-portal-enter-${card.id}`}
@@ -365,64 +355,10 @@ export const LandingPortal: React.FC = () => {
                         </>
                       )}
                     </button>
-
-                    {/* Demo Account Indicator */}
-                    <div className="flex items-center justify-between text-[11px] text-slate-500 bg-slate-50 px-2.5 py-1.5 rounded-lg border border-slate-200">
-                      <span className="font-mono truncate">{card.demoAccountText}</span>
-                      {card.isProtected && (
-                        <button
-                          onClick={() => quickDemoLogin(card.id)}
-                          className="text-[10px] font-bold text-blue-600 hover:text-blue-800 underline shrink-0 cursor-pointer ml-1"
-                          title="Langsung login cepat akun demo"
-                        >
-                          Quick Login
-                        </button>
-                      )}
-                    </div>
                   </div>
                 </div>
               );
             })}
-          </div>
-        </div>
-
-        {/* Demo Quick Reference Banner */}
-        <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-xs flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
-          <div className="space-y-1.5 max-w-2xl">
-            <div className="flex items-center gap-2 text-slate-900 font-bold text-sm">
-              <KeyRound className="w-4 h-4 text-blue-600" />
-              <span>Informasi Kredensial Akun Demo Pengujian</span>
-            </div>
-            <p className="text-xs text-slate-600 leading-relaxed">
-              Semua role yang terproteksi telah dilengkapi akun bawaan untuk pengujian instan. Anda dapat memasukkan data secara manual atau menekan tombol <strong>Quick Login</strong> pada masing-masing kartu.
-            </p>
-            <div className="flex flex-wrap gap-2 pt-1 text-[11px] font-mono">
-              <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-700 border border-slate-200">
-                Admin: <strong>admin</strong> / <strong>admin123</strong>
-              </span>
-              <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-700 border border-slate-200">
-                Operator PIN: <strong>1234</strong> (atau operator/operator123)
-              </span>
-              <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-700 border border-slate-200">
-                SPV: <strong>spv</strong> / <strong>spv123</strong>
-              </span>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2 shrink-0">
-            <button
-              onClick={() => openAuthModal('admin')}
-              className="px-3.5 py-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs transition cursor-pointer"
-            >
-              Buka Form Login
-            </button>
-            <button
-              onClick={() => setIsWallboardOpen(true)}
-              className="px-3.5 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs transition cursor-pointer shadow-xs flex items-center gap-1.5"
-            >
-              <Tv className="w-3.5 h-3.5" />
-              <span>Full TV Wallboard</span>
-            </button>
           </div>
         </div>
       </main>

@@ -9,21 +9,17 @@ import {
   ShieldCheck, 
   ClipboardCheck, 
   HardHat, 
-  BarChart3, 
-  Check, 
-  Sparkles,
-  ArrowRight
+  BarChart3
 } from 'lucide-react';
 import { useWarehouse } from '../context/WarehouseContext';
-import { DEMO_ACCOUNTS, RoleType } from '../types';
+import { RoleType } from '../types';
 
 export const AuthModal: React.FC = () => {
   const { 
     isAuthModalOpen, 
     closeAuthModal, 
     authModalRole, 
-    loginWithCredentials, 
-    quickDemoLogin 
+    loginWithCredentials 
   } = useWarehouse();
 
   const [selectedRole, setSelectedRole] = useState<RoleType>('admin');
@@ -39,15 +35,12 @@ export const AuthModal: React.FC = () => {
       setSelectedRole(authModalRole);
       if (authModalRole === 'operator') {
         setLoginMethod('pin');
-        setPin('1234');
       } else {
         setLoginMethod('password');
-        const demo = DEMO_ACCOUNTS[authModalRole as 'admin' | 'spv'];
-        if (demo) {
-          setUsername(demo.username);
-          setPassword(demo.password);
-        }
       }
+      setUsername('');
+      setPassword('');
+      setPin('');
       setErrorMessage('');
     }
   }, [authModalRole, isAuthModalOpen]);
@@ -57,16 +50,13 @@ export const AuthModal: React.FC = () => {
   const handleRoleTabChange = (role: RoleType) => {
     setSelectedRole(role);
     setErrorMessage('');
+    setUsername('');
+    setPassword('');
+    setPin('');
     if (role === 'operator') {
       setLoginMethod('pin');
-      setPin('1234');
     } else {
       setLoginMethod('password');
-      const demo = DEMO_ACCOUNTS[role as 'admin' | 'spv'];
-      if (demo) {
-        setUsername(demo.username);
-        setPassword(demo.password);
-      }
     }
   };
 
@@ -85,27 +75,9 @@ export const AuthModal: React.FC = () => {
 
       setIsSubmitting(false);
       if (!result.success) {
-        setErrorMessage(result.message || 'Kredensial login tidak cocok.');
+        setErrorMessage(result.message || 'Username atau password yang dimasukkan tidak sesuai.');
       }
     }, 200);
-  };
-
-  const handleQuickDemoFill = () => {
-    if (selectedRole === 'operator') {
-      if (loginMethod === 'pin') {
-        setPin(DEMO_ACCOUNTS.operator.pin);
-      } else {
-        setUsername(DEMO_ACCOUNTS.operator.username);
-        setPassword(DEMO_ACCOUNTS.operator.password);
-      }
-    } else {
-      const demo = DEMO_ACCOUNTS[selectedRole as 'admin' | 'spv'];
-      if (demo) {
-        setUsername(demo.username);
-        setPassword(demo.password);
-      }
-    }
-    setErrorMessage('');
   };
 
   const roleMeta: Record<RoleType, { title: string; desc: string; icon: React.ReactNode; color: string }> = {
@@ -230,18 +202,18 @@ export const AuthModal: React.FC = () => {
               <div className="flex gap-2">
                 <button
                   type="button"
-                  onClick={() => { setLoginMethod('pin'); setPin('1234'); setErrorMessage(''); }}
+                  onClick={() => { setLoginMethod('pin'); setErrorMessage(''); }}
                   className={`px-2.5 py-1 rounded-md text-xs font-bold cursor-pointer transition ${
                     loginMethod === 'pin' 
                       ? 'bg-purple-600 text-white' 
                       : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                   }`}
                 >
-                  Quick PIN
+                  Kode PIN
                 </button>
                 <button
                   type="button"
-                  onClick={() => { setLoginMethod('password'); setUsername('operator'); setPassword('operator123'); setErrorMessage(''); }}
+                  onClick={() => { setLoginMethod('password'); setErrorMessage(''); }}
                   className={`px-2.5 py-1 rounded-md text-xs font-bold cursor-pointer transition ${
                     loginMethod === 'password' 
                       ? 'bg-purple-600 text-white' 
@@ -257,7 +229,7 @@ export const AuthModal: React.FC = () => {
           {selectedRole === 'operator' && loginMethod === 'pin' ? (
             <div>
               <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                PIN Cepat Operator Loading Dock
+                PIN Akses Operator Loading Dock
               </label>
               <div className="relative">
                 <KeyRound className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -267,12 +239,12 @@ export const AuthModal: React.FC = () => {
                   maxLength={6}
                   value={pin}
                   onChange={(e) => setPin(e.target.value)}
-                  placeholder="Masukkan PIN (Default: 1234)"
+                  placeholder="Masukkan 4-6 digit PIN operator"
                   className="w-full pl-9 pr-4 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-slate-900 text-sm font-mono tracking-widest focus:ring-2 focus:ring-purple-500 focus:outline-none focus:bg-white"
                   required
+                  autoFocus
                 />
               </div>
-              <p className="text-[11px] text-slate-500 mt-1">Default Demo PIN: <strong>1234</strong></p>
             </div>
           ) : (
             <>
@@ -289,6 +261,7 @@ export const AuthModal: React.FC = () => {
                     placeholder="Masukkan username"
                     className="w-full pl-9 pr-4 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-slate-900 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none focus:bg-white"
                     required
+                    autoFocus
                   />
                 </div>
               </div>
@@ -311,36 +284,6 @@ export const AuthModal: React.FC = () => {
               </div>
             </>
           )}
-
-          {/* Quick 1-Click Fill & Instant Demo Button */}
-          <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
-            <div className="flex items-center justify-between text-xs">
-              <span className="text-slate-500 font-medium">Akun Demo Resmi:</span>
-              <button
-                type="button"
-                onClick={handleQuickDemoFill}
-                className="text-[11px] font-bold text-blue-600 hover:text-blue-800 underline cursor-pointer"
-              >
-                Isi Otomatis Field
-              </button>
-            </div>
-            <div className="text-[11px] font-mono text-slate-700 bg-white p-2 rounded-lg border border-slate-200 flex items-center justify-between">
-              <span>
-                {selectedRole === 'operator' && loginMethod === 'pin' ? (
-                  <>PIN: <strong>1234</strong></>
-                ) : (
-                  <>User: <strong>{selectedRole}</strong> / Pass: <strong>{selectedRole}123</strong></>
-                )}
-              </span>
-              <button
-                type="button"
-                onClick={() => quickDemoLogin(selectedRole)}
-                className="px-2 py-0.5 rounded bg-blue-50 text-blue-700 hover:bg-blue-100 font-sans font-bold text-[10px] cursor-pointer"
-              >
-                1-Click Instant Login ⚡
-              </button>
-            </div>
-          </div>
 
           {/* Submit Button */}
           <div className="pt-2 flex items-center gap-2.5">
