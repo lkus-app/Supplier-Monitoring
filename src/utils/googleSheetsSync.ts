@@ -2,7 +2,7 @@ import { UnloadingRecord } from '../types';
 
 export const DEFAULT_GAS_URL: string =
   ((import.meta as any).env && (import.meta as any).env.VITE_GOOGLE_APPS_SCRIPT_URL) ||
-  'https://script.google.com/macros/s/AKfycbxAJYZpcwSCPiXIv4krL73OzYGXfRHaK-gpgV8EPP58hSDw82YeOdTbgUpRSp3ynjIf3Q/exec';
+  'https://script.google.com/macros/s/AKfycbzkcQsMnOPKa4Z6NHL8uX6-lhirdPwp5iD_GlWZ2wE244TDbMu9JObkgHzwD0squ0lT/exec';
 
 const GAS_URL_STORAGE_KEY = 'sim_bongkar_gas_url_custom';
 
