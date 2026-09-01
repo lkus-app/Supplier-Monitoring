@@ -19,7 +19,9 @@ import {
   ArrowLeft,
   Tv,
   Sparkles,
-  HardDrive
+  HardDrive,
+  Trash2,
+  RefreshCw
 } from 'lucide-react';
 import { useWarehouse } from '../context/WarehouseContext';
 import { VehicleType, VEHICLE_LEAD_TIMES, UnloadingRecord } from '../types';
@@ -42,10 +44,15 @@ export const SupervisorView: React.FC = () => {
     setIsAiModalOpen,
     returnToPortal,
     logout,
-    authUser
+    authUser,
+    clearAllData,
+    isSyncing,
+    refreshDataFromServer
   } = useWarehouse();
 
   const [isGoogleDriveOpen, setIsGoogleDriveOpen] = useState(false);
+  const [isClearConfirmOpen, setIsClearConfirmOpen] = useState(false);
+  const [isClearing, setIsClearing] = useState(false);
 
   // Search & Filter state
   const [searchQuery, setSearchQuery] = useState('');
@@ -193,6 +200,17 @@ export const SupervisorView: React.FC = () => {
 
         {/* Action Controls */}
         <div className="flex items-center gap-2 flex-wrap">
+          {/* Refresh Sync */}
+          <button
+            onClick={() => refreshDataFromServer()}
+            id="btn-spv-refresh-sync"
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition cursor-pointer border border-slate-200"
+            title="Sinkronkan Data Server Sekarang"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin text-blue-600' : 'text-slate-600'}`} />
+            <span className="hidden sm:inline">Sync</span>
+          </button>
+
           <button
             onClick={() => setIsGoogleDriveOpen(true)}
             id="btn-spv-gdrive"
@@ -229,6 +247,17 @@ export const SupervisorView: React.FC = () => {
           >
             <Printer className="w-4 h-4 text-slate-500" />
             <span>Cetak</span>
+          </button>
+
+          {/* Reset / Clear All Data Button */}
+          <button
+            onClick={() => setIsClearConfirmOpen(true)}
+            id="btn-spv-clear-all-data"
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-red-50 hover:bg-red-100 border border-red-200 text-red-700 text-xs font-bold transition cursor-pointer"
+            title="Kosongkan seluruh data antrean dan riwayat pada server lintas perangkat"
+          >
+            <Trash2 className="w-4 h-4 text-red-600" />
+            <span>Reset Data</span>
           </button>
 
           <button
@@ -756,6 +785,71 @@ export const SupervisorView: React.FC = () => {
         isOpen={isGoogleDriveOpen} 
         onClose={() => setIsGoogleDriveOpen(false)} 
       />
+
+      {/* Reset / Clear All Data Across Devices Confirmation Modal */}
+      {isClearConfirmOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-4">
+            <div className="w-12 h-12 rounded-2xl bg-red-50 border border-red-200 flex items-center justify-center text-red-600">
+              <Trash2 className="w-6 h-6" />
+            </div>
+
+            <div className="space-y-1.5">
+              <h3 className="text-lg font-black text-slate-900">
+                Reset / Kosongkan Seluruh Data Antrean?
+              </h3>
+              <p className="text-xs text-slate-600 leading-relaxed">
+                Tindakan ini akan <strong>menghapus seluruh antrean &amp; riwayat bongkar muat pada server</strong> secara permanen. Perubahan akan langsung disinkronkan serentak ke <strong>semua perangkat yang terhubung (PC, Tablet, &amp; Mobile)</strong>.
+              </p>
+            </div>
+
+            <div className="p-3 bg-amber-50 rounded-xl border border-amber-200 text-amber-800 text-xs flex items-start gap-2">
+              <AlertTriangle className="w-4 h-4 shrink-0 text-amber-600 mt-0.5" />
+              <span>
+                Nomor antrean berikutnya akan dimulai kembali dari <strong>#Q-001</strong>.
+              </span>
+            </div>
+
+            <div className="pt-2 flex items-center justify-end gap-2.5">
+              <button
+                type="button"
+                onClick={() => setIsClearConfirmOpen(false)}
+                disabled={isClearing}
+                className="px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition cursor-pointer"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                id="btn-confirm-clear-all-devices"
+                disabled={isClearing}
+                onClick={async () => {
+                  try {
+                    setIsClearing(true);
+                    await clearAllData();
+                    setIsClearConfirmOpen(false);
+                  } finally {
+                    setIsClearing(false);
+                  }
+                }}
+                className="px-4 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-black shadow-xs transition cursor-pointer flex items-center gap-2"
+              >
+                {isClearing ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Mengosongkan...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Ya, Kosongkan Semua Data</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

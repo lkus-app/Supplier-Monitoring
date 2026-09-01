@@ -159,31 +159,84 @@ async function resolveGoogleDriveFolders(apiKey?: string, token?: string) {
 }
 
 // ----------------------------------------------------
-// 0. In-memory Centralized State for Real-Time Sync
+// 0. Centralized State with Google Sheets & Apps Script Integration
 // ----------------------------------------------------
+const GOOGLE_APPS_SCRIPT_URL =
+  process.env.GOOGLE_APPS_SCRIPT_URL ||
+  process.env.VITE_GOOGLE_APPS_SCRIPT_URL ||
+  'https://script.google.com/macros/s/AKfycbxAJYZpcwSCPiXIv4krL73OzYGXfRHaK-gpgV8EPP58hSDw82YeOdTbgUpRSp3ynjIf3Q/exec';
+
 let serverUnloadingRecords: any[] = [];
 let serverRecordsVersion = 1;
 let serverLastUpdated = new Date().toISOString();
 
-// API: Get All Unloading Records (For Real-time Sync & Polling)
-app.get('/api/unloading-records', (req: Request, res: Response) => {
+// Helper to push updates to Google Apps Script in background
+async function forwardToGoogleAppsScript(payload: any) {
+  if (!GOOGLE_APPS_SCRIPT_URL) return;
+  try {
+    const resp = await fetch(GOOGLE_APPS_SCRIPT_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify(payload),
+    });
+    if (resp.ok) {
+      console.log('Successfully synced with Google Apps Script Web App');
+    }
+  } catch (err) {
+    console.warn('Google Apps Script forward error (non-fatal):', err);
+  }
+}
+
+// Helper to fetch from Google Apps Script
+async function fetchFromGoogleAppsScript() {
+  if (!GOOGLE_APPS_SCRIPT_URL) return;
+  try {
+    const fetchUrl = GOOGLE_APPS_SCRIPT_URL.includes('?') 
+      ? `${GOOGLE_APPS_SCRIPT_URL}&action=getRecords&_t=${Date.now()}` 
+      : `${GOOGLE_APPS_SCRIPT_URL}?action=getRecords&_t=${Date.now()}`;
+    const resp = await fetch(fetchUrl, {
+      method: 'GET',
+      headers: { 'Accept': 'application/json' },
+    });
+    if (resp.ok) {
+      const data: any = await resp.json();
+      if (data && Array.isArray(data.records) && data.records.length > 0) {
+        serverUnloadingRecords = data.records;
+        serverRecordsVersion += 1;
+        serverLastUpdated = new Date().toISOString();
+      }
+    }
+  } catch (err) {
+    console.warn('Initial GAS fetch skipped or offline:', err);
+  }
+}
+
+// Initial fetch from Google Apps Script on startup
+fetchFromGoogleAppsScript();
+
+const handleGetRecords = async (req: Request, res: Response) => {
+  // If query specifies refresh=true, pull fresh from GAS
+  if (req.query.refresh === 'true') {
+    await fetchFromGoogleAppsScript();
+  }
   res.json({
     success: true,
     records: serverUnloadingRecords,
     version: serverRecordsVersion,
     lastUpdated: serverLastUpdated,
     count: serverUnloadingRecords.length,
+    gasUrl: GOOGLE_APPS_SCRIPT_URL ? 'configured' : 'none',
   });
-});
+};
 
-// API: Replace/Batch Save Unloading Records
-app.post('/api/unloading-records', (req: Request, res: Response) => {
+const handlePostRecords = (req: Request, res: Response) => {
   try {
     const { records } = req.body;
     if (Array.isArray(records)) {
       serverUnloadingRecords = records;
       serverRecordsVersion += 1;
       serverLastUpdated = new Date().toISOString();
+      forwardToGoogleAppsScript({ action: 'batchSave', records });
       return res.json({
         success: true,
         records: serverUnloadingRecords,
@@ -195,10 +248,9 @@ app.post('/api/unloading-records', (req: Request, res: Response) => {
   } catch (err: any) {
     return res.status(500).json({ success: false, message: err.message });
   }
-});
+};
 
-// API: Upsert Single Unloading Record
-app.post('/api/unloading-records/item', (req: Request, res: Response) => {
+const handleUpsertItem = (req: Request, res: Response) => {
   try {
     const { record } = req.body;
     if (!record || !record.id) {
@@ -212,6 +264,7 @@ app.post('/api/unloading-records/item', (req: Request, res: Response) => {
     }
     serverRecordsVersion += 1;
     serverLastUpdated = new Date().toISOString();
+    forwardToGoogleAppsScript({ action: 'upsertItem', record });
     return res.json({
       success: true,
       record,
@@ -222,15 +275,15 @@ app.post('/api/unloading-records/item', (req: Request, res: Response) => {
   } catch (err: any) {
     return res.status(500).json({ success: false, message: err.message });
   }
-});
+};
 
-// API: Delete Unloading Record
-app.delete('/api/unloading-records/:id', (req: Request, res: Response) => {
+const handleDeleteItem = (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     serverUnloadingRecords = serverUnloadingRecords.filter((r) => r.id !== id);
     serverRecordsVersion += 1;
     serverLastUpdated = new Date().toISOString();
+    forwardToGoogleAppsScript({ action: 'deleteRecord', id });
     return res.json({
       success: true,
       records: serverUnloadingRecords,
@@ -240,7 +293,39 @@ app.delete('/api/unloading-records/:id', (req: Request, res: Response) => {
   } catch (err: any) {
     return res.status(500).json({ success: false, message: err.message });
   }
-});
+};
+
+const handleClearAllRecords = (req: Request, res: Response) => {
+  serverUnloadingRecords = [];
+  serverRecordsVersion += 1;
+  serverLastUpdated = new Date().toISOString();
+  forwardToGoogleAppsScript({ action: 'clearAll' });
+  return res.json({
+    success: true,
+    records: [],
+    version: serverRecordsVersion,
+    lastUpdated: serverLastUpdated,
+    message: 'All records cleared successfully across all devices and Google Sheets.',
+  });
+};
+
+// Unified routes supporting both /api/records and /api/unloading-records
+app.get('/api/records', handleGetRecords);
+app.get('/api/unloading-records', handleGetRecords);
+
+app.post('/api/records', handlePostRecords);
+app.post('/api/unloading-records', handlePostRecords);
+
+app.post('/api/records/item', handleUpsertItem);
+app.post('/api/unloading-records/item', handleUpsertItem);
+
+app.post('/api/records/clear', handleClearAllRecords);
+app.post('/api/records/reset', handleClearAllRecords);
+app.delete('/api/records', handleClearAllRecords);
+app.post('/api/unloading-records/clear', handleClearAllRecords);
+
+app.delete('/api/records/:id', handleDeleteItem);
+app.delete('/api/unloading-records/:id', handleDeleteItem);
 
 // ----------------------------------------------------
 // 1. API: Google Drive Folder Structure

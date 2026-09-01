@@ -40,14 +40,14 @@ export const SecurityView: React.FC = () => {
     'PT Wings Surya Distribusi'
   ];
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!supplierName.trim() || !driverName.trim() || !licensePlate.trim()) {
       alert('Mohon lengkapi Nama Supplier, Nama Driver, dan Nomor Plat Kendaraan.');
       return;
     }
 
-    const newRecord = addTruckGateIn({
+    const newRecord = await addTruckGateIn({
       supplierName: supplierName.trim(),
       driverName: driverName.trim(),
       licensePlate: licensePlate.trim().toUpperCase(),

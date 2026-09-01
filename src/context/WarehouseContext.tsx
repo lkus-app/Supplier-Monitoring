@@ -1,11 +1,17 @@
 import React, { createContext, useContext, useState, useEffect, useMemo, ReactNode, useCallback, useRef } from 'react';
 import { UnloadingRecord, RoleType, AppViewType, AuthUser, DEMO_ACCOUNTS, OperationalStats, GoodsCondition, VehicleType } from '../types';
-import { INITIAL_UNLOADING_RECORDS } from '../data/initialData';
 import { calculateLeadTime } from '../utils/timeUtils';
+import {
+  fetchRecordsFromGoogleSheets,
+  saveRecordToGoogleSheets,
+  deleteRecordFromGoogleSheets,
+  clearAllFromGoogleSheets,
+  getGoogleAppsScriptUrl,
+  setGoogleAppsScriptUrl
+} from '../utils/googleSheetsSync';
 
-const STORAGE_KEY = 'warehouse_unloading_system_v1';
 const AUTH_STORAGE_KEY = 'warehouse_unloading_auth_user_v1';
-const SYNC_CHANNEL_NAME = 'sim_bongkar_sync_channel';
+const SYNC_CHANNEL_NAME = 'sim_bongkar_sync_channel_v2';
 
 interface WarehouseContextType {
   records: UnloadingRecord[];
@@ -20,6 +26,8 @@ interface WarehouseContextType {
   setSoundEnabled: (enabled: boolean) => void;
   isSyncing: boolean;
   lastSyncTime: string | null;
+  gasUrl: string;
+  updateGasUrl: (url: string) => void;
   refreshDataFromServer: () => Promise<void>;
   
   // Auth Modal & Handlers
@@ -41,7 +49,7 @@ interface WarehouseContextType {
     driverPhone?: string;
     suratJalanNumber?: string;
     suratJalanPhoto?: string;
-  }) => UnloadingRecord;
+  }) => Promise<UnloadingRecord>;
   
   verifyPOAndAssignDock: (id: string, data: {
     poNumber: string;
@@ -49,15 +57,15 @@ interface WarehouseContextType {
     adminNotes?: string;
     adminName?: string;
     suratJalanPhoto?: string;
-  }) => void;
+  }) => Promise<void>;
   
-  startUnloading: (id: string, operatorName: string) => void;
+  startUnloading: (id: string, operatorName: string) => Promise<void>;
   
   operatorFinishUnloading: (id: string, data: {
     operatorName?: string;
     operatorNotes?: string;
     photos?: string[];
-  }) => void;
+  }) => Promise<void>;
   
   finishUnloading: (id: string, data: {
     operatorCount: number;
@@ -65,10 +73,11 @@ interface WarehouseContextType {
     adminFinalNotes?: string;
     goodsPhotos?: string[];
     adminName?: string;
-  }) => void;
+  }) => Promise<void>;
   
-  deleteRecord: (id: string) => void;
-  resetToDemoData: () => void;
+  deleteRecord: (id: string) => Promise<void>;
+  clearAllData: () => Promise<void>;
+  resetToDemoData: () => Promise<void>;
   
   // Modal states
   selectedRecord: UnloadingRecord | null;
@@ -82,18 +91,8 @@ interface WarehouseContextType {
 const WarehouseContext = createContext<WarehouseContextType | undefined>(undefined);
 
 export const WarehouseProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const [records, setRecords] = useState<UnloadingRecord[]>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) return parsed;
-      }
-    } catch {
-      // Fallback
-    }
-    return INITIAL_UNLOADING_RECORDS;
-  });
+  // Server is the single source of truth. Initial state is empty array.
+  const [records, setRecords] = useState<UnloadingRecord[]>([]);
 
   const [activeView, setActiveView] = useState<AppViewType>('portal');
   const [activeRole, setActiveRole] = useState<RoleType>('security');
@@ -122,7 +121,6 @@ export const WarehouseProvider: React.FC<{ children: ReactNode }> = ({ children 
 
   const broadcastChannelRef = useRef<BroadcastChannel | null>(null);
   const lastServerVersionRef = useRef<number>(0);
-  const isInitialMountRef = useRef<boolean>(true);
 
   // Synchronize with BroadcastChannel for instant same-browser cross-tab sync
   useEffect(() => {
@@ -135,6 +133,8 @@ export const WarehouseProvider: React.FC<{ children: ReactNode }> = ({ children 
           if (event.data?.type === 'SYNC_RECORDS' && Array.isArray(event.data.records)) {
             setRecords(event.data.records);
             setLastSyncTime(new Date().toLocaleTimeString('id-ID'));
+          } else if (event.data?.type === 'FORCE_REFETCH') {
+            refreshDataFromServer();
           }
         };
 
@@ -161,67 +161,59 @@ export const WarehouseProvider: React.FC<{ children: ReactNode }> = ({ children 
     }
   }, []);
 
-  // Save to backend API helper
-  const syncRecordsToBackend = useCallback(async (newRecords: UnloadingRecord[]) => {
+  const broadcastForceRefetch = useCallback(() => {
     try {
-      setIsSyncing(true);
-      await fetch('/api/unloading-records', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ records: newRecords }),
-      });
-      setLastSyncTime(new Date().toLocaleTimeString('id-ID'));
-    } catch (err) {
-      console.warn('Backend sync failed (running in offline/client mode):', err);
-    } finally {
-      setIsSyncing(false);
+      if (broadcastChannelRef.current) {
+        broadcastChannelRef.current.postMessage({
+          type: 'FORCE_REFETCH',
+          timestamp: Date.now(),
+        });
+      }
+    } catch {
+      // ignore
     }
   }, []);
 
-  // Sync single item to backend API
-  const syncItemToBackend = useCallback(async (record: UnloadingRecord) => {
-    try {
-      await fetch('/api/unloading-records/item', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ record }),
-      });
-      setLastSyncTime(new Date().toLocaleTimeString('id-ID'));
-    } catch (err) {
-      console.warn('Backend item sync error:', err);
-    }
-  }, []);
+  const [gasUrl, setGasUrlState] = useState<string>(() => getGoogleAppsScriptUrl());
 
-  // Fetch all records from backend
+  const updateGasUrl = (newUrl: string) => {
+    setGoogleAppsScriptUrl(newUrl);
+    setGasUrlState(getGoogleAppsScriptUrl());
+    refreshDataFromServer();
+  };
+
+  // Fetch all records from centralized backend API with Google Apps Script fallback
   const refreshDataFromServer = useCallback(async () => {
     try {
-      const resp = await fetch('/api/unloading-records');
+      // 1. Try fetching from internal Express API
+      const resp = await fetch('/api/records', { cache: 'no-store' });
       if (resp.ok) {
         const data = await resp.json();
         if (data.success && Array.isArray(data.records)) {
-          // If server version is newer or initial load
-          if (data.version !== lastServerVersionRef.current || isInitialMountRef.current) {
+          if (data.version !== lastServerVersionRef.current || lastServerVersionRef.current === 0) {
             lastServerVersionRef.current = data.version;
-            
-            // If server has records, accept them
-            if (data.records.length > 0) {
-              setRecords(data.records);
-            } else if (isInitialMountRef.current && records.length > 0) {
-              // If server was fresh restarted, push current records to server
-              syncRecordsToBackend(records);
-            }
+            setRecords(data.records);
             setLastSyncTime(new Date().toLocaleTimeString('id-ID'));
+            return;
           }
         }
       }
-    } catch (err) {
-      console.warn('Polling /api/unloading-records skipped or offline:', err);
-    } finally {
-      isInitialMountRef.current = false;
+    } catch {
+      // If express backend unreachable (e.g. static host), fallback to direct Google Apps Script
     }
-  }, [records, syncRecordsToBackend]);
 
-  // Initial fetch on mount + Polling interval every 3 seconds for real-time cross-device sync
+    try {
+      const gasResult = await fetchRecordsFromGoogleSheets();
+      if (gasResult.success && Array.isArray(gasResult.records)) {
+        setRecords(gasResult.records);
+        setLastSyncTime(new Date().toLocaleTimeString('id-ID'));
+      }
+    } catch (gasErr) {
+      console.warn('Google Sheets direct fetch error:', gasErr);
+    }
+  }, []);
+
+  // Polling every 3 seconds for continuous cross-device synchronization (PC vs Mobile)
   useEffect(() => {
     refreshDataFromServer();
 
@@ -231,15 +223,6 @@ export const WarehouseProvider: React.FC<{ children: ReactNode }> = ({ children 
 
     return () => clearInterval(pollInterval);
   }, [refreshDataFromServer]);
-
-  // Sync to localStorage
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(records));
-    } catch (e) {
-      console.error('Failed to save warehouse records:', e);
-    }
-  }, [records]);
 
   // Sync Auth User to localStorage
   useEffect(() => {
@@ -421,7 +404,7 @@ export const WarehouseProvider: React.FC<{ children: ReactNode }> = ({ children 
   }, [records, currentTime]);
 
   // Action: Add Truck (Security Gate In -> T1)
-  const addTruckGateIn = (data: {
+  const addTruckGateIn = async (data: {
     supplierName: string;
     driverName: string;
     licensePlate: string;
@@ -429,8 +412,7 @@ export const WarehouseProvider: React.FC<{ children: ReactNode }> = ({ children 
     driverPhone?: string;
     suratJalanNumber?: string;
     suratJalanPhoto?: string;
-  }): UnloadingRecord => {
-    // Determine next sequential queue number #Q-xxx
+  }): Promise<UnloadingRecord> => {
     let maxNum = 0;
     records.forEach((r) => {
       const match = r.queueNumber?.match(/#Q-(\d+)/i);
@@ -445,7 +427,7 @@ export const WarehouseProvider: React.FC<{ children: ReactNode }> = ({ children 
     const todayDate = nowIso.split('T')[0];
 
     const newRecord: UnloadingRecord = {
-      id: `rec-${Date.now()}`,
+      id: `rec-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
       queueNumber,
       date: todayDate,
       supplierName: data.supplierName.trim(),
@@ -459,15 +441,42 @@ export const WarehouseProvider: React.FC<{ children: ReactNode }> = ({ children 
       status: 'MENUNGGU_VERIFIKASI_PO',
     };
 
+    // Optimistic local update
     const updated = [newRecord, ...records];
     setRecords(updated);
     broadcastRecords(updated);
-    syncItemToBackend(newRecord);
+
+    // Sync to Server API and Google Sheets
+    try {
+      setIsSyncing(true);
+      // 1. Direct Google Sheets Sync
+      saveRecordToGoogleSheets(newRecord).catch((e) => console.warn('GAS save item error:', e));
+
+      // 2. Server API Sync
+      const resp = await fetch('/api/records/item', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ record: newRecord }),
+      });
+      if (resp.ok) {
+        const resData = await resp.json();
+        if (resData.records) {
+          setRecords(resData.records);
+          broadcastRecords(resData.records);
+        }
+      }
+    } catch (err) {
+      console.warn('API sync error:', err);
+    } finally {
+      setIsSyncing(false);
+      setLastSyncTime(new Date().toLocaleTimeString('id-ID'));
+    }
+
     return newRecord;
   };
 
   // Action: Admin Step 1 (Verify PO -> T2 & Assign Dock)
-  const verifyPOAndAssignDock = (id: string, data: {
+  const verifyPOAndAssignDock = async (id: string, data: {
     poNumber: string;
     assignedDock: string;
     adminNotes?: string;
@@ -496,11 +505,34 @@ export const WarehouseProvider: React.FC<{ children: ReactNode }> = ({ children 
 
     setRecords(updated);
     broadcastRecords(updated);
-    if (updatedItem) syncItemToBackend(updatedItem);
+
+    if (updatedItem) {
+      try {
+        setIsSyncing(true);
+        saveRecordToGoogleSheets(updatedItem).catch((e) => console.warn('GAS save item error:', e));
+        const resp = await fetch('/api/records/item', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ record: updatedItem }),
+        });
+        if (resp.ok) {
+          const resData = await resp.json();
+          if (resData.records) {
+            setRecords(resData.records);
+            broadcastRecords(resData.records);
+          }
+        }
+      } catch (err) {
+        console.warn('API sync error:', err);
+      } finally {
+        setIsSyncing(false);
+        setLastSyncTime(new Date().toLocaleTimeString('id-ID'));
+      }
+    }
   };
 
   // Action: Operator Step (Start Unloading -> T3)
-  const startUnloading = (id: string, operatorName: string) => {
+  const startUnloading = async (id: string, operatorName: string) => {
     const nowIso = new Date().toISOString();
     let updatedItem: UnloadingRecord | null = null;
 
@@ -519,11 +551,34 @@ export const WarehouseProvider: React.FC<{ children: ReactNode }> = ({ children 
 
     setRecords(updated);
     broadcastRecords(updated);
-    if (updatedItem) syncItemToBackend(updatedItem);
+
+    if (updatedItem) {
+      try {
+        setIsSyncing(true);
+        saveRecordToGoogleSheets(updatedItem).catch((e) => console.warn('GAS save item error:', e));
+        const resp = await fetch('/api/records/item', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ record: updatedItem }),
+        });
+        if (resp.ok) {
+          const resData = await resp.json();
+          if (resData.records) {
+            setRecords(resData.records);
+            broadcastRecords(resData.records);
+          }
+        }
+      } catch (err) {
+        console.warn('API sync error:', err);
+      } finally {
+        setIsSyncing(false);
+        setLastSyncTime(new Date().toLocaleTimeString('id-ID'));
+      }
+    }
   };
 
   // Action: Operator Step (Finish Unloading -> T4 Operator & Send Verification to Admin)
-  const operatorFinishUnloading = (id: string, data: {
+  const operatorFinishUnloading = async (id: string, data: {
     operatorName?: string;
     operatorNotes?: string;
     photos?: string[];
@@ -553,11 +608,34 @@ export const WarehouseProvider: React.FC<{ children: ReactNode }> = ({ children 
 
     setRecords(updated);
     broadcastRecords(updated);
-    if (updatedItem) syncItemToBackend(updatedItem);
+
+    if (updatedItem) {
+      try {
+        setIsSyncing(true);
+        saveRecordToGoogleSheets(updatedItem).catch((e) => console.warn('GAS save item error:', e));
+        const resp = await fetch('/api/records/item', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ record: updatedItem }),
+        });
+        if (resp.ok) {
+          const resData = await resp.json();
+          if (resData.records) {
+            setRecords(resData.records);
+            broadcastRecords(resData.records);
+          }
+        }
+      } catch (err) {
+        console.warn('API sync error:', err);
+      } finally {
+        setIsSyncing(false);
+        setLastSyncTime(new Date().toLocaleTimeString('id-ID'));
+      }
+    }
   };
 
   // Action: Admin Step 2 (Finalize Unloading -> T4 Final)
-  const finishUnloading = (id: string, data: {
+  const finishUnloading = async (id: string, data: {
     operatorCount: number;
     goodsCondition: GoodsCondition;
     adminFinalNotes?: string;
@@ -586,32 +664,84 @@ export const WarehouseProvider: React.FC<{ children: ReactNode }> = ({ children 
 
     setRecords(updated);
     broadcastRecords(updated);
-    if (updatedItem) syncItemToBackend(updatedItem);
+
+    if (updatedItem) {
+      try {
+        setIsSyncing(true);
+        saveRecordToGoogleSheets(updatedItem).catch((e) => console.warn('GAS save item error:', e));
+        const resp = await fetch('/api/records/item', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ record: updatedItem }),
+        });
+        if (resp.ok) {
+          const resData = await resp.json();
+          if (resData.records) {
+            setRecords(resData.records);
+            broadcastRecords(resData.records);
+          }
+        }
+      } catch (err) {
+        console.warn('API sync error:', err);
+      } finally {
+        setIsSyncing(false);
+        setLastSyncTime(new Date().toLocaleTimeString('id-ID'));
+      }
+    }
   };
 
-  // Action: Delete
-  const deleteRecord = (id: string) => {
+  // Action: Delete Single Record
+  const deleteRecord = async (id: string) => {
     const updated = records.filter((r) => r.id !== id);
     setRecords(updated);
     broadcastRecords(updated);
     if (selectedRecord?.id === id) setSelectedRecord(null);
 
-    fetch(`/api/unloading-records/${id}`, { method: 'DELETE' }).catch((err) =>
-      console.warn('Backend delete sync error:', err)
-    );
+    try {
+      setIsSyncing(true);
+      deleteRecordFromGoogleSheets(id).catch((e) => console.warn('GAS delete item error:', e));
+      const resp = await fetch(`/api/records/${id}`, { method: 'DELETE' });
+      if (resp.ok) {
+        const resData = await resp.json();
+        if (resData.records) {
+          setRecords(resData.records);
+          broadcastRecords(resData.records);
+        }
+      }
+    } catch (err) {
+      console.warn('API delete sync error:', err);
+    } finally {
+      setIsSyncing(false);
+      setLastSyncTime(new Date().toLocaleTimeString('id-ID'));
+    }
   };
 
-  // Action: Reset Clean Data
-  const resetToDemoData = () => {
+  // Action: Clear All Active Data Across All Connected Devices
+  const clearAllData = async () => {
     setRecords([]);
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify([]));
-    } catch {
-      // ignore
-    }
-    syncRecordsToBackend([]);
     broadcastRecords([]);
+    if (selectedRecord) setSelectedRecord(null);
+
+    try {
+      setIsSyncing(true);
+      clearAllFromGoogleSheets().catch((e) => console.warn('GAS clear all error:', e));
+      const resp = await fetch('/api/records/clear', { method: 'POST' });
+      if (resp.ok) {
+        const resData = await resp.json();
+        setRecords(resData.records || []);
+        broadcastRecords(resData.records || []);
+      }
+    } catch (err) {
+      console.warn('API clear error:', err);
+    } finally {
+      setIsSyncing(false);
+      setLastSyncTime(new Date().toLocaleTimeString('id-ID'));
+      broadcastForceRefetch();
+    }
   };
+
+  // Alias for backward compatibility
+  const resetToDemoData = clearAllData;
 
   return (
     <WarehouseContext.Provider
@@ -628,6 +758,8 @@ export const WarehouseProvider: React.FC<{ children: ReactNode }> = ({ children 
         setSoundEnabled,
         isSyncing,
         lastSyncTime,
+        gasUrl,
+        updateGasUrl,
         refreshDataFromServer,
         isAuthModalOpen,
         authModalRole,
@@ -643,6 +775,7 @@ export const WarehouseProvider: React.FC<{ children: ReactNode }> = ({ children 
         operatorFinishUnloading,
         finishUnloading,
         deleteRecord,
+        clearAllData,
         resetToDemoData,
         selectedRecord,
         setSelectedRecord,
