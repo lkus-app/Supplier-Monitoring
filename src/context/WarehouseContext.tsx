@@ -91,17 +91,13 @@ interface WarehouseContextType {
 const WarehouseContext = createContext<WarehouseContextType | undefined>(undefined);
 
 export const WarehouseProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  // Server is the single source of truth. Initial state is empty array.
   const [records, setRecords] = useState<UnloadingRecord[]>([]);
-
   const [activeView, setActiveView] = useState<AppViewType>('portal');
   const [activeRole, setActiveRole] = useState<RoleType>('security');
   const [authUser, setAuthUser] = useState<AuthUser | null>(() => {
     try {
       const saved = localStorage.getItem(AUTH_STORAGE_KEY);
-      if (saved) {
-        return JSON.parse(saved);
-      }
+      if (saved) return JSON.parse(saved);
     } catch {
       // Fallback
     }
@@ -120,7 +116,6 @@ export const WarehouseProvider: React.FC<{ children: ReactNode }> = ({ children 
   const [lastSyncTime, setLastSyncTime] = useState<string | null>(null);
 
   const broadcastChannelRef = useRef<BroadcastChannel | null>(null);
-  const lastServerVersionRef = useRef<number>(0);
 
   // Synchronize with BroadcastChannel for instant same-browser cross-tab sync
   useEffect(() => {
@@ -182,44 +177,26 @@ export const WarehouseProvider: React.FC<{ children: ReactNode }> = ({ children 
     refreshDataFromServer();
   };
 
-  // Fetch all records from centralized backend API with Google Apps Script fallback
+  // Fetch all records directly from Google Sheets via Apps Script
   const refreshDataFromServer = useCallback(async () => {
     try {
-      // 1. Try fetching from internal Express API
-      const resp = await fetch('/api/records', { cache: 'no-store' });
-      if (resp.ok) {
-        const data = await resp.json();
-        if (data.success && Array.isArray(data.records)) {
-          if (data.version !== lastServerVersionRef.current || lastServerVersionRef.current === 0) {
-            lastServerVersionRef.current = data.version;
-            setRecords(data.records);
-            setLastSyncTime(new Date().toLocaleTimeString('id-ID'));
-            return;
-          }
-        }
-      }
-    } catch {
-      // If express backend unreachable (e.g. static host), fallback to direct Google Apps Script
-    }
-
-    try {
       const gasResult = await fetchRecordsFromGoogleSheets();
-      if (gasResult.success && Array.isArray(gasResult.records)) {
+      if (gasResult && gasResult.success && Array.isArray(gasResult.records)) {
         setRecords(gasResult.records);
         setLastSyncTime(new Date().toLocaleTimeString('id-ID'));
       }
     } catch (gasErr) {
-      console.warn('Google Sheets direct fetch error:', gasErr);
+      console.warn('Google Sheets fetch error:', gasErr);
     }
   }, []);
 
-  // Polling every 3 seconds for continuous cross-device synchronization (PC vs Mobile)
+  // Polling every 5 seconds for continuous cross-device synchronization (PC vs Mobile)
   useEffect(() => {
     refreshDataFromServer();
 
     const pollInterval = setInterval(() => {
       refreshDataFromServer();
-    }, 3000);
+    }, 5000);
 
     return () => clearInterval(pollInterval);
   }, [refreshDataFromServer]);
@@ -446,27 +423,12 @@ export const WarehouseProvider: React.FC<{ children: ReactNode }> = ({ children 
     setRecords(updated);
     broadcastRecords(updated);
 
-    // Sync to Server API and Google Sheets
+    // Save directly to Google Sheets
     try {
       setIsSyncing(true);
-      // 1. Direct Google Sheets Sync
-      saveRecordToGoogleSheets(newRecord).catch((e) => console.warn('GAS save item error:', e));
-
-      // 2. Server API Sync
-      const resp = await fetch('/api/records/item', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ record: newRecord }),
-      });
-      if (resp.ok) {
-        const resData = await resp.json();
-        if (resData.records) {
-          setRecords(resData.records);
-          broadcastRecords(resData.records);
-        }
-      }
+      await saveRecordToGoogleSheets(newRecord);
     } catch (err) {
-      console.warn('API sync error:', err);
+      console.warn('GAS save error:', err);
     } finally {
       setIsSyncing(false);
       setLastSyncTime(new Date().toLocaleTimeString('id-ID'));
@@ -509,21 +471,9 @@ export const WarehouseProvider: React.FC<{ children: ReactNode }> = ({ children 
     if (updatedItem) {
       try {
         setIsSyncing(true);
-        saveRecordToGoogleSheets(updatedItem).catch((e) => console.warn('GAS save item error:', e));
-        const resp = await fetch('/api/records/item', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ record: updatedItem }),
-        });
-        if (resp.ok) {
-          const resData = await resp.json();
-          if (resData.records) {
-            setRecords(resData.records);
-            broadcastRecords(resData.records);
-          }
-        }
+        await saveRecordToGoogleSheets(updatedItem);
       } catch (err) {
-        console.warn('API sync error:', err);
+        console.warn('GAS save error:', err);
       } finally {
         setIsSyncing(false);
         setLastSyncTime(new Date().toLocaleTimeString('id-ID'));
@@ -555,21 +505,9 @@ export const WarehouseProvider: React.FC<{ children: ReactNode }> = ({ children 
     if (updatedItem) {
       try {
         setIsSyncing(true);
-        saveRecordToGoogleSheets(updatedItem).catch((e) => console.warn('GAS save item error:', e));
-        const resp = await fetch('/api/records/item', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ record: updatedItem }),
-        });
-        if (resp.ok) {
-          const resData = await resp.json();
-          if (resData.records) {
-            setRecords(resData.records);
-            broadcastRecords(resData.records);
-          }
-        }
+        await saveRecordToGoogleSheets(updatedItem);
       } catch (err) {
-        console.warn('API sync error:', err);
+        console.warn('GAS save error:', err);
       } finally {
         setIsSyncing(false);
         setLastSyncTime(new Date().toLocaleTimeString('id-ID'));
@@ -612,21 +550,9 @@ export const WarehouseProvider: React.FC<{ children: ReactNode }> = ({ children 
     if (updatedItem) {
       try {
         setIsSyncing(true);
-        saveRecordToGoogleSheets(updatedItem).catch((e) => console.warn('GAS save item error:', e));
-        const resp = await fetch('/api/records/item', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ record: updatedItem }),
-        });
-        if (resp.ok) {
-          const resData = await resp.json();
-          if (resData.records) {
-            setRecords(resData.records);
-            broadcastRecords(resData.records);
-          }
-        }
+        await saveRecordToGoogleSheets(updatedItem);
       } catch (err) {
-        console.warn('API sync error:', err);
+        console.warn('GAS save error:', err);
       } finally {
         setIsSyncing(false);
         setLastSyncTime(new Date().toLocaleTimeString('id-ID'));
@@ -668,21 +594,9 @@ export const WarehouseProvider: React.FC<{ children: ReactNode }> = ({ children 
     if (updatedItem) {
       try {
         setIsSyncing(true);
-        saveRecordToGoogleSheets(updatedItem).catch((e) => console.warn('GAS save item error:', e));
-        const resp = await fetch('/api/records/item', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ record: updatedItem }),
-        });
-        if (resp.ok) {
-          const resData = await resp.json();
-          if (resData.records) {
-            setRecords(resData.records);
-            broadcastRecords(resData.records);
-          }
-        }
+        await saveRecordToGoogleSheets(updatedItem);
       } catch (err) {
-        console.warn('API sync error:', err);
+        console.warn('GAS save error:', err);
       } finally {
         setIsSyncing(false);
         setLastSyncTime(new Date().toLocaleTimeString('id-ID'));
@@ -699,17 +613,9 @@ export const WarehouseProvider: React.FC<{ children: ReactNode }> = ({ children 
 
     try {
       setIsSyncing(true);
-      deleteRecordFromGoogleSheets(id).catch((e) => console.warn('GAS delete item error:', e));
-      const resp = await fetch(`/api/records/${id}`, { method: 'DELETE' });
-      if (resp.ok) {
-        const resData = await resp.json();
-        if (resData.records) {
-          setRecords(resData.records);
-          broadcastRecords(resData.records);
-        }
-      }
+      await deleteRecordFromGoogleSheets(id);
     } catch (err) {
-      console.warn('API delete sync error:', err);
+      console.warn('GAS delete error:', err);
     } finally {
       setIsSyncing(false);
       setLastSyncTime(new Date().toLocaleTimeString('id-ID'));
@@ -724,15 +630,9 @@ export const WarehouseProvider: React.FC<{ children: ReactNode }> = ({ children 
 
     try {
       setIsSyncing(true);
-      clearAllFromGoogleSheets().catch((e) => console.warn('GAS clear all error:', e));
-      const resp = await fetch('/api/records/clear', { method: 'POST' });
-      if (resp.ok) {
-        const resData = await resp.json();
-        setRecords(resData.records || []);
-        broadcastRecords(resData.records || []);
-      }
+      await clearAllFromGoogleSheets();
     } catch (err) {
-      console.warn('API clear error:', err);
+      console.warn('GAS clear error:', err);
     } finally {
       setIsSyncing(false);
       setLastSyncTime(new Date().toLocaleTimeString('id-ID'));
@@ -740,7 +640,6 @@ export const WarehouseProvider: React.FC<{ children: ReactNode }> = ({ children 
     }
   };
 
-  // Alias for backward compatibility
   const resetToDemoData = clearAllData;
 
   return (
