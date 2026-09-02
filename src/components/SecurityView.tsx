@@ -31,13 +31,10 @@ export const SecurityView: React.FC = () => {
   const [isSuccessToast, setIsSuccessToast] = useState(false);
 
   // Quick Preset Suppliers for rapid Security entry
-  const quickSuppliers = [
-    'PT Indofood CBP Sukses Makmur',
-    'PT Unilever Logistics Indonesia',
-    'CV Sumber Makmur Carton',
-    'PT Mayora Indah Tbk',
-    'PT Nestle Indonesia',
-    'PT Wings Surya Distribusi'
+   const QUICK_SUPPLIERS = [
+  'Sorini Agro Asia',
+  'Citra Abadi Kemindo',
+  'Khamael Berakhah Sejahtera'
   ];
 
   const handleSubmit = async (e: React.FormEvent) => {
