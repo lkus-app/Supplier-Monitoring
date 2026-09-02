@@ -185,23 +185,20 @@ export interface AuthUser {
 
 export const DEMO_ACCOUNTS = {
   admin: {
-    username: 'admin',
-    password: 'admin123',
-    name: 'Budi Santoso',
-    title: 'Staff Admin Gudang & Dokumen',
+    username: 'adminwhckl',
+    password: '2026',
+    name: 'Admin WH CKL',
   },
   operator: {
     username: 'operator',
-    password: 'operator123',
-    pin: '1234',
-    name: 'Regu Alpha (Doni Prasetyo)',
-    title: 'Kru / Mandor Loading Dock',
+    password: '2026',
+    pin: '123456',
+    name: 'Operator WH CKL',
   },
   spv: {
-    username: 'spv',
-    password: 'spv123',
-    name: 'Hendra Wijaya, S.T.',
-    title: 'Warehouse Supervisor & Control Tower',
+    username: 'spvwhckl',
+    password: 'whckl2026',
+    name: 'Supervisor WH CKL',
   },
 };
 

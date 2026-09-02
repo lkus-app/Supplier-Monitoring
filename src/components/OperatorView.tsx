@@ -38,7 +38,7 @@ export const OperatorView: React.FC = () => {
     authUser
   } = useWarehouse();
 
-  const [operatorName, setOperatorName] = useState(authUser?.name || 'Tim Dock Alpha (3 Orang)');
+  const [operatorName, setOperatorName] = useState(authUser?.name || 'Operator WH CKL');
   const [selectedDockFilter, setSelectedDockFilter] = useState('ALL');
 
   // Modal State for Operator Finish Unload

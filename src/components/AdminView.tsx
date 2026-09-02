@@ -59,7 +59,7 @@ export const AdminView: React.FC = () => {
   const [verifyingRecord, setVerifyingRecord] = useState<UnloadingRecord | null>(null);
   const [dockInput, setDockInput] = useState<string>('Gudang BA1 depan');
   const [adminNotes1, setAdminNotes1] = useState('');
-  const [adminName1, setAdminName1] = useState(authUser?.name || 'Agus Santoso (Admin Gudang)');
+  const [adminName1, setAdminName1] = useState(authUser?.name || 'Admin WH CKL');
   const [supplementalPhoto, setSupplementalPhoto] = useState<string | null>(null);
 
   // Step 2 Finalization Modal / Drawer State
@@ -67,7 +67,7 @@ export const AdminView: React.FC = () => {
   const [operatorCount, setOperatorCount] = useState<number>(3);
   const [goodsCondition, setGoodsCondition] = useState<GoodsCondition>('Sesuai');
   const [adminFinalNotes, setAdminFinalNotes] = useState('');
-  const [adminName2, setAdminName2] = useState(authUser?.name || 'Agus Santoso (Admin Gudang)');
+  const [adminName2, setAdminName2] = useState(authUser?.name || 'Admin WH CKL');
   const [uploadedPhotos, setUploadedPhotos] = useState<string[]>([]);
   const [previewPhotoModal, setPreviewPhotoModal] = useState<string | null>(null);
 
