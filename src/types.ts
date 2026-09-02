@@ -48,11 +48,11 @@ export const VEHICLE_LEAD_TIMES: Record<VehicleType, { minutes: number; label: s
 export type QueueStatus = 
   | 'MENUNGGU_VERIFIKASI_PO' // T1 recorded, waiting Admin PO Check
   | 'PO_READY_DOCK_ASSIGNED'  // T2 recorded, dock assigned, waiting Operator
-  | 'SEDANG_BONGKAR'         // T3 recorded, active unloading
+  | 'SEDANG_BONGKAR'          // T3 recorded, active unloading
   | 'WAITING_ADMIN_VERIFICATION' // Operator finished (T4 Operator), waiting Admin physical check
   | 'MENUNGGU_VERIFIKASI_ADMIN'  // Alias
-  | 'SELESAI_BONGKAR'        // T4 final recorded, finalized
-  | 'FINISHED';              // Alias
+  | 'SELESAI_BONGKAR'         // T4 final recorded, finalized
+  | 'FINISHED';               // Alias
 
 export type GoodsCondition = 'Sesuai' | 'Selisih' | 'Rusak';
 
@@ -182,22 +182,22 @@ export interface AuthUser {
 
 export const DEMO_ACCOUNTS = {
   admin: {
-    username: 'admin',
-    password: 'admin123',
-    name: 'Budi Santoso',
+    username: 'adminwhckl',
+    password: '2026',
+    name: 'Admin WH CKL',
     title: 'Staff Admin Gudang & Dokumen',
   },
   operator: {
     username: 'operator',
-    password: 'operator123',
-    pin: '1234',
-    name: 'Regu Alpha (Doni Prasetyo)',
+    password: '2026',
+    pin: '123456',
+    name: 'Operator WH CKL',
     title: 'Kru / Mandor Loading Dock',
   },
   spv: {
-    username: 'spv',
-    password: 'spv123',
-    name: 'Hendra Wijaya, S.T.',
+    username: 'spvwhckl',
+    password: 'whckl2026',
+    name: 'Supervisor WH CKL',
     title: 'Warehouse Supervisor & Control Tower',
   },
 };
