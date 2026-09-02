@@ -9,7 +9,6 @@ import {
   ArrowLeft, 
   Home, 
   Clock, 
-  Sparkles,
   ArrowRight
 } from 'lucide-react';
 import { useWarehouse } from '../context/WarehouseContext';
@@ -31,10 +30,10 @@ export const SecurityView: React.FC = () => {
   const [isSuccessToast, setIsSuccessToast] = useState(false);
 
   // Quick Preset Suppliers for rapid Security entry
-   const QUICK_SUPPLIERS = [
-  'Sorini Agro Asia',
-  'Citra Abadi Kemindo',
-  'Khamael Berakhah Sejahtera'
+  const QUICK_SUPPLIERS = [
+    'Sorini Agro Asia',
+    'Citra Abadi Kemindo',
+    'Khamael Berakhah Sejahtera'
   ];
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -174,7 +173,7 @@ export const SecurityView: React.FC = () => {
               <span className="text-[10px] text-slate-400 font-normal">Klik untuk mengisi otomatis</span>
             </label>
             <div className="flex flex-wrap gap-1.5">
-              {quickSuppliers.map((s) => (
+              {QUICK_SUPPLIERS.map((s) => (
                 <button
                   type="button"
                   key={s}
@@ -206,7 +205,7 @@ export const SecurityView: React.FC = () => {
                 required
                 value={supplierName}
                 onChange={(e) => setSupplierName(e.target.value)}
-                placeholder="Contoh: PT Indofood CBP Sukses Makmur"
+                placeholder="Contoh: Sorini Agro Asia"
                 className="w-full pl-10 pr-4 py-3 bg-white border border-slate-300 rounded-xl text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm font-medium"
               />
             </div>
