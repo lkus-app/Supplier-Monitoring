@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useMemo, ReactNode, useCallback, useRef } from 'react';
 import { UnloadingRecord, RoleType, AppViewType, AuthUser, DEMO_ACCOUNTS, OperationalStats, GoodsCondition, VehicleType } from '../types';
-import { calculateLeadTime } from '../utils/timeUtils';
+import { calculateLeadTime, getLocalDateString, isRecordToday } from '../utils/timeUtils';
 import {
   fetchRecordsFromGoogleSheets,
   saveRecordToGoogleSheets,
@@ -332,9 +332,14 @@ export const WarehouseProvider: React.FC<{ children: ReactNode }> = ({ children 
     }
   };
 
-  // Compute live operational statistics
+  // Compute live operational statistics for today's operational dashboard
   const stats = useMemo<OperationalStats>(() => {
-    let totalToday = records.length;
+    const todayStr = getLocalDateString();
+    
+    // Total kedatangan supplier yang tercatat hari ini
+    const todayRecords = records.filter(r => isRecordToday(r, todayStr));
+    const totalToday = todayRecords.length;
+
     let waitingPO = 0;
     let waitingDockQueue = 0;
     let readyDock = 0;
@@ -347,6 +352,7 @@ export const WarehouseProvider: React.FC<{ children: ReactNode }> = ({ children 
     let completedWithDurationCount = 0;
 
     records.forEach((r) => {
+      const isFromToday = isRecordToday(r, todayStr);
       const analysis = calculateLeadTime(r, currentTime);
       
       if (r.status === 'MENUNGGU_VERIFIKASI_PO') {
@@ -362,15 +368,18 @@ export const WarehouseProvider: React.FC<{ children: ReactNode }> = ({ children 
         waitingAdminVerification++;
         if (analysis.isOverdue) overdueCount++;
       } else if (r.status === 'SELESAI_BONGKAR' || r.status === 'FINISHED') {
-        completedToday++;
-        if (analysis.isOverdue) {
-          overdueCount++;
-        } else {
-          onTimeCount++;
-        }
-        if (analysis.actualUnloadingMinutes > 0) {
-          totalDurationSum += analysis.actualUnloadingMinutes;
-          completedWithDurationCount++;
+        // Hanya hitung yang selesai hari ini, tidak diakumulasi dari hari-hari sebelumnya
+        if (isFromToday) {
+          completedToday++;
+          if (analysis.isOverdue) {
+            overdueCount++;
+          } else {
+            onTimeCount++;
+          }
+          if (analysis.actualUnloadingMinutes > 0) {
+            totalDurationSum += analysis.actualUnloadingMinutes;
+            completedWithDurationCount++;
+          }
         }
       }
     });
@@ -404,18 +413,23 @@ export const WarehouseProvider: React.FC<{ children: ReactNode }> = ({ children 
     suratJalanNumber?: string;
     suratJalanPhoto?: string;
   }): Promise<UnloadingRecord> => {
+    const todayDate = getLocalDateString();
+    
+    // Cari nomor urutan tertinggi KHUSUS untuk hari ini (reset ke 000 setiap pergantian hari / 00:00:00)
     let maxNum = 0;
     records.forEach((r) => {
-      const match = r.queueNumber?.match(/#Q-(\d+)/i);
-      if (match) {
-        const n = parseInt(match[1], 10);
-        if (!isNaN(n) && n > maxNum) maxNum = n;
+      if (isRecordToday(r, todayDate)) {
+        const match = r.queueNumber?.match(/#Q-(\d+)/i);
+        if (match) {
+          const n = parseInt(match[1], 10);
+          if (!isNaN(n) && n > maxNum) maxNum = n;
+        }
       }
     });
+
     const nextSeqNumber = maxNum + 1;
     const queueNumber = `#Q-${String(nextSeqNumber).padStart(3, '0')}`;
     const nowIso = new Date().toISOString();
-    const todayDate = nowIso.split('T')[0];
 
     const newRecord: UnloadingRecord = {
       id: `rec-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
@@ -425,9 +439,9 @@ export const WarehouseProvider: React.FC<{ children: ReactNode }> = ({ children 
       driverName: data.driverName.trim(),
       licensePlate: data.licensePlate.trim().toUpperCase(),
       vehicleType: data.vehicleType,
-      driverPhone: data.driverPhone?.trim(),
-      suratJalanNumber: data.suratJalanNumber?.trim() || `SJ-${Date.now().toString().slice(-6)}`,
-      suratJalanPhoto: data.suratJalanPhoto,
+      driverPhone: data.driverPhone?.trim() || '',
+      suratJalanNumber: data.suratJalanNumber?.trim() || '',
+      suratJalanPhoto: data.suratJalanPhoto || '',
       t1GateIn: nowIso,
       status: 'MENUNGGU_VERIFIKASI_PO',
     };
@@ -529,21 +543,9 @@ export const WarehouseProvider: React.FC<{ children: ReactNode }> = ({ children 
     if (updatedItem) {
       try {
         setIsSyncing(true);
-        saveRecordToGoogleSheets(updatedItem).catch((e) => console.warn('GAS save item error:', e));
-        const resp = await fetch('/api/records/item', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ record: updatedItem }),
-        });
-        if (resp.ok) {
-          const resData = await resp.json();
-          if (resData.records) {
-            setRecords(resData.records);
-            broadcastRecords(resData.records);
-          }
-        }
+        await saveRecordToGoogleSheets(updatedItem);
       } catch (err) {
-        console.warn('API sync error:', err);
+        console.warn('GAS save error:', err);
       } finally {
         setIsSyncing(false);
         setLastSyncTime(new Date().toLocaleTimeString('id-ID'));
@@ -572,21 +574,9 @@ export const WarehouseProvider: React.FC<{ children: ReactNode }> = ({ children 
     if (updatedItem) {
       try {
         setIsSyncing(true);
-        saveRecordToGoogleSheets(updatedItem).catch((e) => console.warn('GAS save item error:', e));
-        const resp = await fetch('/api/records/item', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ record: updatedItem }),
-        });
-        if (resp.ok) {
-          const resData = await resp.json();
-          if (resData.records) {
-            setRecords(resData.records);
-            broadcastRecords(resData.records);
-          }
-        }
+        await saveRecordToGoogleSheets(updatedItem);
       } catch (err) {
-        console.warn('API sync error:', err);
+        console.warn('GAS save error:', err);
       } finally {
         setIsSyncing(false);
         setLastSyncTime(new Date().toLocaleTimeString('id-ID'));

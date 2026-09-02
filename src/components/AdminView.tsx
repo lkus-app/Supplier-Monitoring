@@ -30,12 +30,13 @@ import {
 } from 'lucide-react';
 import { useWarehouse } from '../context/WarehouseContext';
 import { UnloadingRecord, GoodsCondition, WAREHOUSE_ZONES } from '../types';
-import { formatDateTime, formatShortTime, calculateLeadTime, formatDuration } from '../utils/timeUtils';
+import { formatDateTime, formatShortTime, calculateLeadTime, formatDuration, getLocalDateString, isRecordToday } from '../utils/timeUtils';
 import { GoogleDriveModal } from './GoogleDriveModal';
 
 export const AdminView: React.FC = () => {
   const { 
     records, 
+    stats,
     verifyPOAndAssignDock, 
     verifyPOAndHold,
     releaseQueueToDock,
@@ -54,6 +55,7 @@ export const AdminView: React.FC = () => {
   // Active sub-tab in Admin View
   const [adminTab, setAdminTab] = useState<'step1_po' | 'antri_mundur' | 'step2_final' | 'all_records'>('step1_po');
   const [searchFilter, setSearchFilter] = useState('');
+  const [adminDateFilter, setAdminDateFilter] = useState<'TODAY' | 'ALL'>('TODAY');
 
   // Step 1 Verification Modal / Drawer State
   const [verifyingRecord, setVerifyingRecord] = useState<UnloadingRecord | null>(null);
@@ -367,7 +369,7 @@ export const AdminView: React.FC = () => {
                   : 'text-slate-600 hover:text-slate-900 hover:bg-white/50'
               }`}
             >
-              Semua ({records.length})
+              Semua ({stats.totalToday} Hari Ini)
             </button>
           </div>
 
@@ -811,9 +813,30 @@ export const AdminView: React.FC = () => {
       {adminTab === 'all_records' && (
         <div className="space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <h3 className="text-base sm:text-lg font-bold text-slate-800">
-              Semua Antrean Bongkaran Hari Ini ({records.length})
-            </h3>
+            <div className="flex items-center gap-3">
+              <h3 className="text-base sm:text-lg font-bold text-slate-800">
+                {adminDateFilter === 'TODAY' ? 'Antrean Bongkaran Hari Ini' : 'Semua Riwayat Database'} (
+                {records.filter(r => (adminDateFilter === 'TODAY' ? isRecordToday(r) : true)).length})
+              </h3>
+              <div className="inline-flex rounded-lg border border-slate-200 bg-slate-100 p-0.5 text-xs font-bold">
+                <button
+                  onClick={() => setAdminDateFilter('TODAY')}
+                  className={`px-2.5 py-1 rounded-md transition ${
+                    adminDateFilter === 'TODAY' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  🟢 Hari Ini
+                </button>
+                <button
+                  onClick={() => setAdminDateFilter('ALL')}
+                  className={`px-2.5 py-1 rounded-md transition ${
+                    adminDateFilter === 'ALL' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  📚 Semua Riwayat
+                </button>
+              </div>
+            </div>
             <div className="relative">
               <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
               <input
@@ -845,11 +868,15 @@ export const AdminView: React.FC = () => {
                 </thead>
                 <tbody className="divide-y divide-slate-100 font-medium">
                   {records
-                    .filter(r => 
-                      r.supplierName.toLowerCase().includes(searchFilter.toLowerCase()) ||
-                      r.licensePlate.toLowerCase().includes(searchFilter.toLowerCase()) ||
-                      r.queueNumber.toLowerCase().includes(searchFilter.toLowerCase())
-                    )
+                    .filter(r => {
+                      if (adminDateFilter === 'TODAY' && !isRecordToday(r)) return false;
+                      const q = searchFilter.toLowerCase();
+                      return (
+                        r.supplierName.toLowerCase().includes(q) ||
+                        r.licensePlate.toLowerCase().includes(q) ||
+                        r.queueNumber.toLowerCase().includes(q)
+                      );
+                    })
                     .map((rec) => (
                       <tr key={rec.id} className="hover:bg-blue-50/30 transition">
                         <td className="px-4 py-3 font-mono font-bold text-blue-600">

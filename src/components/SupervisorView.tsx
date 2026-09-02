@@ -31,7 +31,9 @@ import {
   formatDate, 
   formatDuration, 
   calculateLeadTime, 
-  exportToCSV 
+  exportToCSV,
+  getLocalDateString,
+  isRecordToday
 } from '../utils/timeUtils';
 
 export const SupervisorView: React.FC = () => {
@@ -58,14 +60,25 @@ export const SupervisorView: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedVehicleType, setSelectedVehicleType] = useState('ALL');
   const [selectedStatus, setSelectedStatus] = useState('ALL');
+  const [selectedDateFilter, setSelectedDateFilter] = useState<'TODAY' | 'ALL' | string>('TODAY');
+  const [customDateValue, setCustomDateValue] = useState<string>(getLocalDateString());
   const [sortField, setSortField] = useState<'queueNumber' | 'supplierName' | 't1GateIn' | 'variance'>('t1GateIn');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const [activeTab, setActiveTab] = useState<'live_table' | 'analytics_report'>('live_table');
 
   // Filtered & Sorted records
   const filteredRecords = useMemo(() => {
+    const todayStr = getLocalDateString();
     return records
       .filter((rec) => {
+        // Date filter
+        if (selectedDateFilter === 'TODAY') {
+          if (!isRecordToday(rec, todayStr)) return false;
+        } else if (selectedDateFilter === 'CUSTOM') {
+          if (!isRecordToday(rec, customDateValue)) return false;
+        }
+        // 'ALL' allows all history records
+
         const matchesSearch = 
           rec.supplierName.toLowerCase().includes(searchQuery.toLowerCase()) ||
           rec.driverName.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -99,9 +112,9 @@ export const SupervisorView: React.FC = () => {
         const timeB = new Date(b.t1GateIn).getTime();
         return sortOrder === 'asc' ? timeA - timeB : timeB - timeA;
       });
-  }, [records, searchQuery, selectedVehicleType, selectedStatus, sortField, sortOrder, currentTime]);
+  }, [records, searchQuery, selectedVehicleType, selectedStatus, selectedDateFilter, customDateValue, sortField, sortOrder, currentTime]);
 
-  // Analytics Aggregations
+  // Analytics Aggregations (computed based on filtered records)
   const analyticsData = useMemo(() => {
     const vehicleCounts: Record<string, { total: number; onTime: number; overdue: number; avgActualMinutes: number; totalMinutes: number }> = {};
     let sesuaiCount = 0;
@@ -113,7 +126,7 @@ export const SupervisorView: React.FC = () => {
       vehicleCounts[type] = { total: 0, onTime: 0, overdue: 0, avgActualMinutes: 0, totalMinutes: 0 };
     });
 
-    records.forEach((r) => {
+    filteredRecords.forEach((r) => {
       const analysis = calculateLeadTime(r, currentTime);
       const type = r.vehicleType;
       if (!vehicleCounts[type]) {
@@ -123,15 +136,15 @@ export const SupervisorView: React.FC = () => {
       vehicleCounts[type].total++;
       if (analysis.isOverdue) {
         vehicleCounts[type].overdue++;
-      } else if (r.status === 'SELESAI_BONGKAR') {
+      } else if (r.status === 'SELESAI_BONGKAR' || r.status === 'FINISHED') {
         vehicleCounts[type].onTime++;
       }
 
-      if (r.status === 'SELESAI_BONGKAR' && analysis.actualUnloadingMinutes > 0) {
+      if ((r.status === 'SELESAI_BONGKAR' || r.status === 'FINISHED') && analysis.actualUnloadingMinutes > 0) {
         vehicleCounts[type].totalMinutes += analysis.actualUnloadingMinutes;
       }
 
-      if (r.status === 'SELESAI_BONGKAR') {
+      if (r.status === 'SELESAI_BONGKAR' || r.status === 'FINISHED') {
         totalCompleted++;
         if (r.goodsCondition === 'Sesuai') sesuaiCount++;
         else if (r.goodsCondition === 'Selisih') selisihCount++;
@@ -154,10 +167,15 @@ export const SupervisorView: React.FC = () => {
         totalCompleted,
       }
     };
-  }, [records, currentTime]);
+  }, [filteredRecords, currentTime]);
 
   const handleExportCSV = () => {
-    exportToCSV(filteredRecords, `Laporan_Bongkar_${new Date().toISOString().split('T')[0]}.csv`);
+    const dateLabel = selectedDateFilter === 'TODAY' 
+      ? getLocalDateString() 
+      : selectedDateFilter === 'CUSTOM' 
+        ? customDateValue 
+        : 'Semua_Riwayat';
+    exportToCSV(filteredRecords, `Laporan_Bongkar_${dateLabel}.csv`);
   };
 
   const handlePrintReport = () => {
@@ -414,6 +432,27 @@ export const SupervisorView: React.FC = () => {
             </div>
 
             <div className="flex items-center gap-2 flex-wrap">
+              {/* Filter Date */}
+              <div className="flex items-center gap-1 bg-slate-50 border border-slate-300 rounded-lg p-0.5">
+                <select
+                  value={selectedDateFilter}
+                  onChange={(e) => setSelectedDateFilter(e.target.value)}
+                  className="px-2.5 py-1 text-xs bg-transparent text-slate-700 font-bold focus:outline-none cursor-pointer"
+                >
+                  <option value="TODAY">🟢 Hari Ini (Live)</option>
+                  <option value="CUSTOM">📆 Pilih Tanggal...</option>
+                  <option value="ALL">📚 Semua Riwayat Database</option>
+                </select>
+                {selectedDateFilter === 'CUSTOM' && (
+                  <input
+                    type="date"
+                    value={customDateValue}
+                    onChange={(e) => setCustomDateValue(e.target.value)}
+                    className="px-2 py-0.5 text-xs bg-white border border-slate-300 rounded text-slate-800 font-mono focus:outline-none"
+                  />
+                )}
+              </div>
+
               {/* Filter Vehicle */}
               <select
                 value={selectedVehicleType}

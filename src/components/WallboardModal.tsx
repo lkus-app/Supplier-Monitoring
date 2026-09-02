@@ -14,7 +14,7 @@ import {
   Warehouse
 } from 'lucide-react';
 import { useWarehouse } from '../context/WarehouseContext';
-import { formatShortTime, calculateLeadTime, formatDuration } from '../utils/timeUtils';
+import { formatShortTime, calculateLeadTime, formatDuration, isRecordToday } from '../utils/timeUtils';
 
 export const WallboardModal: React.FC = () => {
   const { 
@@ -57,10 +57,10 @@ export const WallboardModal: React.FC = () => {
   if (!isWallboardOpen) return null;
 
   const activeBongkar = records.filter(r => r.status === 'SEDANG_BONGKAR');
-  const waitingVerification = records.filter(r => r.status === 'WAITING_ADMIN_VERIFICATION');
+  const waitingVerification = records.filter(r => r.status === 'WAITING_ADMIN_VERIFICATION' || r.status === 'MENUNGGU_VERIFIKASI_ADMIN');
   const readyDock = records.filter(r => r.status === 'PO_READY_DOCK_ASSIGNED');
   const waitingPO = records.filter(r => r.status === 'MENUNGGU_VERIFIKASI_PO');
-  const finishedToday = records.filter(r => r.status === 'SELESAI_BONGKAR');
+  const finishedToday = records.filter(r => (r.status === 'SELESAI_BONGKAR' || r.status === 'FINISHED') && isRecordToday(r));
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-950 text-white flex flex-col overflow-y-auto p-4 sm:p-6 select-none">

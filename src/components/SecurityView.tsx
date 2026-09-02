@@ -16,7 +16,7 @@ import { VehicleType, VEHICLE_LEAD_TIMES, UnloadingRecord } from '../types';
 import { formatShortTime } from '../utils/timeUtils';
 
 export const SecurityView: React.FC = () => {
-  const { addTruckGateIn, records, returnToPortal } = useWarehouse();
+  const { addTruckGateIn, records, stats, returnToPortal } = useWarehouse();
 
   // Form states
   const [supplierName, setSupplierName] = useState('');
@@ -108,7 +108,7 @@ export const SecurityView: React.FC = () => {
         <div className="flex items-center gap-2 self-start sm:self-center">
           <div className="px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 text-right">
             <span className="text-[10px] text-slate-500 font-semibold uppercase block">Total Hari Ini</span>
-            <span className="text-lg font-black text-slate-900 font-mono">{records.length} Truk</span>
+            <span className="text-lg font-black text-slate-900 font-mono">{stats.totalToday} Truk</span>
           </div>
           <button
             onClick={returnToPortal}

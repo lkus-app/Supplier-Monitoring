@@ -42,6 +42,51 @@ export function formatDateTime(isoString?: string): string {
 }
 
 /**
+ * Get YYYY-MM-DD string in local user timezone
+ */
+export function getLocalDateString(d: Date = new Date()): string {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+/**
+ * Extract YYYY-MM-DD date string from an unloading record
+ */
+export function getRecordDateString(record: UnloadingRecord): string {
+  if (record.date && /^\d{4}-\d{2}-\d{2}$/.test(record.date)) {
+    return record.date;
+  }
+  if (record.t1GateIn) {
+    try {
+      const dt = new Date(record.t1GateIn);
+      if (!isNaN(dt.getTime())) {
+        return getLocalDateString(dt);
+      }
+    } catch {
+      // ignore
+    }
+  }
+  return getLocalDateString();
+}
+
+/**
+ * Check if a record belongs to the specified date (defaults to today's local date)
+ */
+export function isRecordToday(record: UnloadingRecord, targetDate: string = getLocalDateString()): boolean {
+  return getRecordDateString(record) === targetDate;
+}
+
+/**
+ * Check if two date strings represent the same date
+ */
+export function isSameDate(dateStr1?: string, dateStr2?: string): boolean {
+  if (!dateStr1 || !dateStr2) return false;
+  return dateStr1.slice(0, 10) === dateStr2.slice(0, 10);
+}
+
+/**
  * Calculate difference in minutes between two timestamps
  */
 export function getDurationMinutes(startIso?: string, endIso?: string): number {
