@@ -23,7 +23,10 @@ import {
   Bell,
   PackageCheck,
   AlertTriangle,
-  Eye
+  Eye,
+  Megaphone,
+  PauseCircle,
+  Play
 } from 'lucide-react';
 import { useWarehouse } from '../context/WarehouseContext';
 import { UnloadingRecord, GoodsCondition, WAREHOUSE_ZONES } from '../types';
@@ -34,6 +37,8 @@ export const AdminView: React.FC = () => {
   const { 
     records, 
     verifyPOAndAssignDock, 
+    verifyPOAndHold,
+    releaseQueueToDock,
     finishUnloading, 
     setSelectedRecord,
     setActiveRole,
@@ -44,17 +49,17 @@ export const AdminView: React.FC = () => {
   } = useWarehouse();
 
   const [isGoogleDriveOpen, setIsGoogleDriveOpen] = useState(false);
+  const [actionToast, setActionToast] = useState<string | null>(null);
 
   // Active sub-tab in Admin View
-  const [adminTab, setAdminTab] = useState<'step1_po' | 'step2_final' | 'all_records'>('step1_po');
+  const [adminTab, setAdminTab] = useState<'step1_po' | 'antri_mundur' | 'step2_final' | 'all_records'>('step1_po');
   const [searchFilter, setSearchFilter] = useState('');
 
   // Step 1 Verification Modal / Drawer State
   const [verifyingRecord, setVerifyingRecord] = useState<UnloadingRecord | null>(null);
-  const [poNumberInput, setPoNumberInput] = useState('');
   const [dockInput, setDockInput] = useState<string>('Gudang BA1 depan');
   const [adminNotes1, setAdminNotes1] = useState('');
-  const [adminName1, setAdminName1] = useState('Agus Santoso (Admin Gudang)');
+  const [adminName1, setAdminName1] = useState(authUser?.name || 'Agus Santoso (Admin Gudang)');
   const [supplementalPhoto, setSupplementalPhoto] = useState<string | null>(null);
 
   // Step 2 Finalization Modal / Drawer State
@@ -62,7 +67,7 @@ export const AdminView: React.FC = () => {
   const [operatorCount, setOperatorCount] = useState<number>(3);
   const [goodsCondition, setGoodsCondition] = useState<GoodsCondition>('Sesuai');
   const [adminFinalNotes, setAdminFinalNotes] = useState('');
-  const [adminName2, setAdminName2] = useState('Agus Santoso (Admin Gudang)');
+  const [adminName2, setAdminName2] = useState(authUser?.name || 'Agus Santoso (Admin Gudang)');
   const [uploadedPhotos, setUploadedPhotos] = useState<string[]>([]);
   const [previewPhotoModal, setPreviewPhotoModal] = useState<string | null>(null);
 
@@ -71,6 +76,7 @@ export const AdminView: React.FC = () => {
 
   // Filtered lists
   const waitingPOList = records.filter(r => r.status === 'MENUNGGU_VERIFIKASI_PO');
+  const waitingDockQueueList = records.filter(r => r.status === 'WAITING_DOCK_QUEUE');
   const waitingVerificationList = records.filter(
     r => r.status === 'WAITING_ADMIN_VERIFICATION' || r.status === 'MENUNGGU_VERIFIKASI_ADMIN'
   );
@@ -81,19 +87,19 @@ export const AdminView: React.FC = () => {
   // Handle open verification modal (Step 1)
   const handleOpenVerify = (rec: UnloadingRecord) => {
     setVerifyingRecord(rec);
-    setPoNumberInput(rec.poNumber || `PO-WH-2026-${Math.floor(1000 + Math.random() * 9000)}`);
     setDockInput(rec.assignedDock || 'Gudang BA1 depan');
     setAdminNotes1('');
     setSupplementalPhoto(rec.suratJalanPhoto || null);
   };
 
-  // Dynamic active workload counter per warehouse zone (status: PO_READY_DOCK_ASSIGNED, SEDANG_BONGKAR, WAITING_ADMIN_VERIFICATION)
+  // Dynamic active workload counter per warehouse zone
   const getZoneWorkload = (zoneName: string) => {
     const activeRecords = records.filter(r => {
       // Exclude current verifying record from counting
       if (verifyingRecord && r.id === verifyingRecord.id) return false;
       const isDockMatch = (r.assignedDock || '').trim().toLowerCase() === zoneName.trim().toLowerCase();
       const isActive = 
+        r.status === 'WAITING_DOCK_QUEUE' ||
         r.status === 'PO_READY_DOCK_ASSIGNED' || 
         r.status === 'SEDANG_BONGKAR' || 
         r.status === 'WAITING_ADMIN_VERIFICATION' || 
@@ -107,23 +113,56 @@ export const AdminView: React.FC = () => {
     };
   };
 
-  // Handle submit Step 1 (Verify PO -> T2)
-  const handleSubmitVerify = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!verifyingRecord || !poNumberInput.trim() || !dockInput.trim()) {
-      alert('Mohon isi Nomor PO dan Nomor Dock.');
+  // Step 1 Option A: Direct Unload / Langsung Mundur
+  const handleVerifyAndDirect = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!verifyingRecord || !dockInput.trim()) {
+      alert('Mohon pilih Zona Gudang Bongkar.');
       return;
     }
 
+    const queueNum = verifyingRecord.queueNumber;
+    const targetDock = dockInput;
+
     verifyPOAndAssignDock(verifyingRecord.id, {
-      poNumber: poNumberInput,
-      assignedDock: dockInput,
+      assignedDock: targetDock,
       adminNotes: adminNotes1,
       adminName: adminName1,
       suratJalanPhoto: supplementalPhoto || undefined,
     });
 
+    setActionToast(`Armada ${queueNum} diverifikasi & diarahkan LANGSUNG MUNDUR ke ${targetDock}.`);
+    setTimeout(() => setActionToast(null), 5000);
     setVerifyingRecord(null);
+  };
+
+  // Step 1 Option B: Hold / Antri Mundur
+  const handleVerifyAndHold = () => {
+    if (!verifyingRecord || !dockInput.trim()) {
+      alert('Mohon pilih Zona Gudang Bongkar.');
+      return;
+    }
+
+    const queueNum = verifyingRecord.queueNumber;
+    const targetDock = dockInput;
+
+    verifyPOAndHold(verifyingRecord.id, {
+      assignedDock: targetDock,
+      adminNotes: adminNotes1,
+      adminName: adminName1,
+      suratJalanPhoto: supplementalPhoto || undefined,
+    });
+
+    setActionToast(`Armada ${queueNum} diverifikasi & masuk ke antrean HOLD MUNDUR (${targetDock}).`);
+    setTimeout(() => setActionToast(null), 5000);
+    setVerifyingRecord(null);
+  };
+
+  // Action from "Antri Mundur" tab: Panggil / Siap Mundur
+  const handleCallToDock = (rec: UnloadingRecord) => {
+    releaseQueueToDock(rec.id);
+    setActionToast(`📢 Armada ${rec.queueNumber} dipanggil! Status beralih ke Siap Bongkar di ${rec.assignedDock || 'Dock'}.`);
+    setTimeout(() => setActionToast(null), 5000);
   };
 
   // Handle open finalize / physical check modal (Step 2)
@@ -152,6 +191,8 @@ export const AdminView: React.FC = () => {
       adminName: adminName2,
     });
 
+    setActionToast(`Bongkaran ${finalizingRecord.queueNumber} berhasil difinalisasi (T4 Selesai).`);
+    setTimeout(() => setActionToast(null), 5000);
     setFinalizingRecord(null);
   };
 
@@ -180,6 +221,22 @@ export const AdminView: React.FC = () => {
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+      {/* Action Toast Feedback */}
+      {actionToast && (
+        <div className="bg-emerald-600 text-white p-3.5 rounded-xl shadow-lg flex items-center justify-between gap-3 animate-in fade-in slide-in-from-top-2 duration-300">
+          <div className="flex items-center gap-2.5 text-xs sm:text-sm font-semibold">
+            <CheckCircle2 className="w-5 h-5 text-emerald-200 shrink-0" />
+            <span>{actionToast}</span>
+          </div>
+          <button
+            onClick={() => setActionToast(null)}
+            className="text-emerald-200 hover:text-white p-1 rounded-lg transition cursor-pointer"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
       {/* Real-time Notification Alert for Waiting Admin Verification */}
       {waitingVerificationList.length > 0 && (
         <div className="bg-gradient-to-r from-amber-500 to-orange-500 text-white p-4 rounded-xl shadow-md flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-in fade-in slide-in-from-top-2 duration-300">
@@ -235,10 +292,10 @@ export const AdminView: React.FC = () => {
             )}
           </div>
           <h2 className="text-xl sm:text-2xl font-black text-slate-800">
-            Verifikasi PO PPIC (T2) &amp; Finalisasi Bongkar (T4)
+            Verifikasi Kedatangan, Antrean Mundur &amp; Finalisasi Bongkar
           </h2>
           <p className="text-xs sm:text-sm text-slate-500">
-            Validasi fisik Surat Jalan, tentukan alokasi Dock, dan verifikasi kondisi fisik barang pasca bongkar.
+            Validasi fisik Surat Jalan, tentukan alokasi zona dock/tanki, kelola antri mundur, dan verifikasi barang pasca bongkar.
           </p>
         </div>
 
@@ -258,6 +315,25 @@ export const AdminView: React.FC = () => {
                 adminTab === 'step1_po' ? 'bg-white text-orange-600' : 'bg-orange-100 text-orange-700'
               }`}>
                 {waitingPOList.length}
+              </span>
+            </button>
+
+            <button
+              onClick={() => setAdminTab('antri_mundur')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
+                adminTab === 'antri_mundur'
+                  ? 'bg-amber-600 text-white shadow-sm'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-white/50'
+              }`}
+            >
+              <PauseCircle className="w-3.5 h-3.5" />
+              <span>Antri Mundur</span>
+              <span className={`px-1.5 py-0.2 text-[10px] rounded-full font-bold ${
+                adminTab === 'antri_mundur' 
+                  ? 'bg-white text-amber-700' 
+                  : waitingDockQueueList.length > 0 ? 'bg-amber-500 text-white animate-pulse' : 'bg-amber-100 text-amber-800'
+              }`}>
+                {waitingDockQueueList.length}
               </span>
             </button>
 
@@ -398,6 +474,106 @@ export const AdminView: React.FC = () => {
                       >
                         <FileCheck className="w-4 h-4" />
                         <span>Verifikasi &amp; Cek PO PPIC</span>
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* STAGE: ANTRI MUNDUR / HOLD AREA BONGKAR */}
+      {adminTab === 'antri_mundur' && (
+        <div className="space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200 pb-3">
+            <div className="flex items-center gap-2">
+              <span className="w-3 h-3 rounded-full bg-amber-500" />
+              <h3 className="text-base sm:text-lg font-bold text-slate-800">
+                Daftar Armada Antri Mundur / Hold Area ({waitingDockQueueList.length})
+              </h3>
+            </div>
+            <p className="text-xs text-slate-500">
+              Armada telah verifikasi berkas &amp; dialokasikan zona. Klik &quot;Panggil / Siap Mundur&quot; saat dock/tanki siap menerima.
+            </p>
+          </div>
+
+          {waitingDockQueueList.length === 0 ? (
+            <div className="bg-white border border-dashed border-slate-300 rounded-xl p-12 text-center space-y-3">
+              <CheckCircle2 className="w-12 h-12 text-emerald-500 mx-auto" />
+              <h4 className="text-slate-800 font-bold text-base">Tidak Ada Armada yang Antri Mundur</h4>
+              <p className="text-xs text-slate-500 max-w-md mx-auto">
+                Semua armada yang masuk telah langsung diarahkan mundur ke loading dock atau belum diverifikasi berkasnya.
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+              {waitingDockQueueList.map((rec) => {
+                const zoneLoad = getZoneWorkload(rec.assignedDock || '');
+                return (
+                  <div
+                    key={rec.id}
+                    className="bg-white border-2 border-amber-200 hover:border-amber-400 rounded-xl p-5 shadow-sm flex flex-col justify-between gap-4 transition"
+                  >
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-mono font-bold px-2.5 py-1 rounded-md bg-amber-100 text-amber-800 border border-amber-300 flex items-center gap-1">
+                          <PauseCircle className="w-3.5 h-3.5 text-amber-600" />
+                          <span>{rec.queueNumber}</span>
+                        </span>
+                        <span className="text-xs text-slate-500 font-mono flex items-center gap-1">
+                          <Clock className="w-3.5 h-3.5 text-slate-400" />
+                          T1: {formatShortTime(rec.t1GateIn)}
+                        </span>
+                      </div>
+
+                      <div>
+                        <h4 className="font-bold text-slate-900 text-base leading-snug">{rec.supplierName}</h4>
+                        <p className="text-xs font-mono text-slate-600 mt-0.5">
+                          {rec.licensePlate} • {rec.driverName}
+                        </p>
+                      </div>
+
+                      <div className="bg-amber-50/70 rounded-lg p-3 border border-amber-200/80 space-y-2 text-xs">
+                        <div className="flex justify-between items-center">
+                          <span className="text-slate-600 font-medium">Jenis Armada:</span>
+                          <span className="font-semibold text-slate-800">{rec.vehicleType}</span>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-slate-600 font-medium">Target Alokasi:</span>
+                          <span className="font-mono font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
+                            {rec.assignedDock || 'Belum Ditentukan'}
+                          </span>
+                        </div>
+                        <div className="flex justify-between items-center pt-1 border-t border-amber-200/60">
+                          <span className="text-slate-500 text-[11px]">Kondisi Dock Target:</span>
+                          {zoneLoad.count === 0 ? (
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
+                              🟢 Dock Kosong / Siap
+                            </span>
+                          ) : (
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-200 text-amber-900">
+                              ⚠️ {zoneLoad.count} Truk Masih Aktif
+                            </span>
+                          )}
+                        </div>
+                        {rec.adminNotes && (
+                          <div className="pt-1 text-[11px] text-slate-600 italic">
+                            Catatan: &quot;{rec.adminNotes}&quot;
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="pt-2 border-t border-slate-100">
+                      <button
+                        onClick={() => handleCallToDock(rec)}
+                        id={`btn-call-dock-${rec.id}`}
+                        className="w-full py-2.5 px-4 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-2 transition cursor-pointer shadow-sm hover:shadow"
+                      >
+                        <Megaphone className="w-4 h-4 animate-bounce" />
+                        <span>Panggil / Siap Mundur</span>
                       </button>
                     </div>
                   </div>
@@ -691,14 +867,18 @@ export const AdminView: React.FC = () => {
                         <td className="px-4 py-3 font-mono text-slate-600">{formatShortTime(rec.t4UnloadingFinish)}</td>
                         <td className="px-4 py-3">
                           <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-black uppercase ${
-                            rec.status === 'MENUNGGU_VERIFIKASI_PO' ? 'bg-orange-100 text-orange-700' :
-                            rec.status === 'PO_READY_DOCK_ASSIGNED' ? 'bg-blue-100 text-blue-700' :
-                            rec.status === 'SEDANG_BONGKAR' ? 'bg-indigo-100 text-indigo-700' :
-                            'bg-emerald-100 text-emerald-700'
+                            rec.status === 'MENUNGGU_VERIFIKASI_PO' ? 'bg-orange-100 text-orange-700 border border-orange-200' :
+                            rec.status === 'WAITING_DOCK_QUEUE' ? 'bg-amber-100 text-amber-800 border border-amber-300' :
+                            rec.status === 'PO_READY_DOCK_ASSIGNED' ? 'bg-blue-100 text-blue-700 border border-blue-200' :
+                            rec.status === 'SEDANG_BONGKAR' ? 'bg-indigo-100 text-indigo-700 border border-indigo-200' :
+                            rec.status === 'WAITING_ADMIN_VERIFICATION' || rec.status === 'MENUNGGU_VERIFIKASI_ADMIN' ? 'bg-amber-100 text-amber-900 border border-amber-400' :
+                            'bg-emerald-100 text-emerald-700 border border-emerald-200'
                           }`}>
                             {rec.status === 'MENUNGGU_VERIFIKASI_PO' ? 'Menunggu PO' :
+                             rec.status === 'WAITING_DOCK_QUEUE' ? 'Antri Mundur' :
                              rec.status === 'PO_READY_DOCK_ASSIGNED' ? 'Ready Dock' :
-                             rec.status === 'SEDANG_BONGKAR' ? 'Bongkar' : 'Selesai'}
+                             rec.status === 'SEDANG_BONGKAR' ? 'Bongkar' :
+                             rec.status === 'WAITING_ADMIN_VERIFICATION' || rec.status === 'MENUNGGU_VERIFIKASI_ADMIN' ? 'Perlu Cek' : 'Selesai'}
                           </span>
                         </td>
                         <td className="px-4 py-3 text-right">
@@ -718,18 +898,18 @@ export const AdminView: React.FC = () => {
         </div>
       )}
 
-      {/* MODAL 1: VERIFIKASI & CEK PO PPIC (STEP 1 -> T2) */}
+      {/* MODAL 1: VERIFIKASI & CEK DOKUMEN / ALOKASI ZONA (STEP 1 -> T2) */}
       {verifyingRecord && (
-        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white border border-slate-200 rounded-xl max-w-lg w-full p-6 shadow-2xl space-y-5 animate-in fade-in zoom-in duration-200">
+        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white border border-slate-200 rounded-2xl max-w-xl w-full p-6 shadow-2xl space-y-5 my-6 animate-in fade-in zoom-in duration-200">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-              <div className="flex items-center gap-2">
-                <span className="p-1.5 rounded-lg bg-orange-50 text-orange-600">
+              <div className="flex items-center gap-2.5">
+                <span className="p-2 rounded-xl bg-orange-50 text-orange-600 border border-orange-200">
                   <FileCheck className="w-5 h-5" />
                 </span>
                 <div>
-                  <h3 className="font-bold text-slate-800 text-base">Verifikasi &amp; Cek PO PPIC (T2)</h3>
-                  <p className="text-xs text-slate-500 font-mono">{verifyingRecord.queueNumber} - {verifyingRecord.supplierName}</p>
+                  <h3 className="font-bold text-slate-900 text-base sm:text-lg">Verifikasi Surat Jalan &amp; Alokasi Zona</h3>
+                  <p className="text-xs text-slate-500 font-mono">{verifyingRecord.queueNumber} • {verifyingRecord.supplierName}</p>
                 </div>
               </div>
               <button
@@ -740,71 +920,74 @@ export const AdminView: React.FC = () => {
               </button>
             </div>
 
-            <form onSubmit={handleSubmitVerify} className="space-y-4 text-xs sm:text-sm">
+            <div className="space-y-4 text-xs sm:text-sm">
               {/* Truck Info Summary */}
-              <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 grid grid-cols-2 gap-2 text-xs">
+              <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200 grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs">
                 <div>
-                  <span className="text-slate-500 block">Armada:</span>
+                  <span className="text-slate-500 block text-[11px]">Armada:</span>
                   <span className="text-slate-800 font-bold">{verifyingRecord.vehicleType}</span>
                 </div>
                 <div>
-                  <span className="text-slate-500 block">No Polisi:</span>
+                  <span className="text-slate-500 block text-[11px]">No Polisi:</span>
                   <span className="text-slate-800 font-mono font-bold">{verifyingRecord.licensePlate}</span>
                 </div>
                 <div>
-                  <span className="text-slate-500 block">Waktu Masuk (T1):</span>
-                  <span className="text-emerald-600 font-mono font-bold">{formatShortTime(verifyingRecord.t1GateIn)} WIB</span>
+                  <span className="text-slate-500 block text-[11px]">Waktu Masuk (T1):</span>
+                  <span className="text-emerald-700 font-mono font-bold">{formatShortTime(verifyingRecord.t1GateIn)} WIB</span>
                 </div>
                 <div>
-                  <span className="text-slate-500 block">Surat Jalan:</span>
-                  <span className="text-slate-700 font-medium">{verifyingRecord.suratJalanNumber || '-'}</span>
+                  <span className="text-slate-500 block text-[11px]">Surat Jalan:</span>
+                  <span className="text-slate-700 font-medium truncate block">{verifyingRecord.suratJalanNumber || '-'}</span>
                 </div>
               </div>
 
-              {/* Nomor PO PPIC */}
-              <div className="space-y-1.5">
-                <label className="font-bold text-slate-700">
-                  Nomor PO PPIC Gudang <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={poNumberInput}
-                  onChange={(e) => setPoNumberInput(e.target.value)}
-                  placeholder="PO-WH-2026-XXXX"
-                  className="w-full px-3 py-2.5 bg-white border border-slate-300 rounded-lg text-slate-900 font-mono focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                />
-              </div>
-
-              {/* Alokasi Pintu Loading Dock / Zona Gudang */}
-              <div className="space-y-2">
+              {/* Alokasi Pintu Loading Dock / Zona Gudang (CHIP GRID SELECTION) */}
+              <div className="space-y-2.5">
                 <div className="flex items-center justify-between">
-                  <label className="font-bold text-slate-700 flex items-center gap-1">
-                    <span>Alokasikan Zona Gudang Bongkar</span>
+                  <label className="font-bold text-slate-800 flex items-center gap-1">
+                    <span>Pilih Alokasi Zona Gudang / Tanki Bongkar</span>
                     <span className="text-red-500">*</span>
                   </label>
                   <span className="text-[11px] text-slate-500 font-medium">
-                    Indikator Beban Real-time
+                    Pilih salah satu zona di bawah:
                   </span>
                 </div>
 
-                <select
-                  value={dockInput}
-                  onChange={(e) => setDockInput(e.target.value)}
-                  className="w-full px-3 py-2.5 bg-white border border-slate-300 rounded-lg text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 text-xs sm:text-sm font-medium cursor-pointer shadow-xs"
-                >
+                {/* Direct Chip/Button Grid for all 9 Zones */}
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                   {WAREHOUSE_ZONES.map((zone) => {
                     const load = getZoneWorkload(zone);
-                    const label = load.count > 0 
-                      ? `${zone} — (${load.count} Truk Aktif / Sedang Bongkar)` 
-                      : `${zone} — (🟢 Kosong / Siap)`;
+                    const isSelected = dockInput === zone;
                     return (
-                      <option key={zone} value={zone}>
-                        {label}
-                      </option>
+                      <button
+                        key={zone}
+                        type="button"
+                        onClick={() => setDockInput(zone)}
+                        className={`p-2.5 rounded-xl border text-left text-xs transition cursor-pointer flex flex-col justify-between gap-1.5 ${
+                          isSelected
+                            ? 'border-blue-600 bg-blue-50 text-blue-900 ring-2 ring-blue-500/20 font-bold shadow-xs'
+                            : 'border-slate-200 bg-slate-50/90 hover:bg-slate-100 hover:border-slate-300 text-slate-700 font-medium'
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-1">
+                          <span className="text-xs leading-snug font-semibold">{zone}</span>
+                          {isSelected && <Check className="w-3.5 h-3.5 text-blue-600 shrink-0" />}
+                        </div>
+                        <div>
+                          {load.count === 0 ? (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 font-bold inline-flex items-center gap-1">
+                              <span>🟢</span> Kosong / Siap
+                            </span>
+                          ) : (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-900 font-bold inline-flex items-center gap-1">
+                              <span>⚠️</span> {load.count} Truk Aktif
+                            </span>
+                          )}
+                        </div>
+                      </button>
                     );
                   })}
-                </select>
+                </div>
 
                 {/* Visual Guidance for Selected Warehouse Occupancy Status */}
                 {(() => {
@@ -818,10 +1001,10 @@ export const AdminView: React.FC = () => {
                             <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
                           </span>
                           <span className="text-[11px]">
-                            <strong className="text-emerald-900">🟢 Kosong &amp; Siap:</strong> Tidak ada antrean truk aktif di <strong>{dockInput}</strong>. Siap dialokasikan.
+                            <strong className="text-emerald-900">🟢 Zona Kosong &amp; Siap:</strong> Tidak ada antrean truk aktif di <strong>{dockInput}</strong>. Siap langsung menerima armada.
                           </span>
                         </div>
-                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-200/80 text-emerald-900 font-bold shrink-0">
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-200 text-emerald-900 font-bold shrink-0">
                           Tersedia
                         </span>
                       </div>
@@ -844,65 +1027,28 @@ export const AdminView: React.FC = () => {
                             <li key={rec.id}>
                               <span className="font-mono font-bold text-blue-700">{rec.queueNumber}</span> ({rec.supplierName})
                               <span className="ml-1 text-[10px] px-1.5 py-0.2 rounded bg-slate-200 text-slate-700 font-semibold">
-                                {rec.status === 'SEDANG_BONGKAR' ? 'Sedang Bongkar' : rec.status === 'PO_READY_DOCK_ASSIGNED' ? 'Ready Dock' : 'Verifikasi Akhir'}
+                                {rec.status === 'SEDANG_BONGKAR' ? 'Sedang Bongkar' : rec.status === 'PO_READY_DOCK_ASSIGNED' ? 'Ready Dock' : rec.status === 'WAITING_DOCK_QUEUE' ? 'Antri Mundur' : 'Verifikasi Akhir'}
                               </span>
                             </li>
                           ))}
                         </ul>
                         <p className="text-[10px] text-slate-500 pt-0.5">
-                          💡 <strong className="text-amber-900">Saran Admin:</strong> Pertimbangkan memilih zona lain yang bertanda <strong>🟢 Kosong</strong> untuk meratakan beban kerja bongkar.
+                          💡 <strong className="text-amber-900">Petunjuk:</strong> Anda dapat memilih tombol <strong>&quot;Verifikasi &amp; Hold (Antri Mundur)&quot;</strong> jika zona ini masih penuh.
                         </p>
                       </div>
                     </div>
                   );
                 })()}
-
-                {/* Quick Selection Buttons for all 7 zones */}
-                <div className="pt-1">
-                  <div className="text-[10px] text-slate-500 font-semibold mb-1 flex items-center justify-between">
-                    <span>Pilihan Cepat 7 Zona Gudang:</span>
-                    <span className="text-[9px] text-slate-400">Klik untuk langsung memilih</span>
-                  </div>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-1">
-                    {WAREHOUSE_ZONES.map((zone) => {
-                      const load = getZoneWorkload(zone);
-                      const isSelected = dockInput === zone;
-                      return (
-                        <button
-                          key={zone}
-                          type="button"
-                          onClick={() => setDockInput(zone)}
-                          className={`px-2 py-1.5 rounded-lg border text-left text-xs transition cursor-pointer flex items-center justify-between gap-1 ${
-                            isSelected
-                              ? 'border-blue-600 bg-blue-50 text-blue-900 ring-2 ring-blue-500/20 font-bold shadow-xs'
-                              : 'border-slate-200 bg-slate-50/80 hover:bg-slate-100 text-slate-700 font-medium'
-                          }`}
-                        >
-                          <span className="truncate text-[11px]">{zone}</span>
-                          {load.count === 0 ? (
-                            <span className="text-[9px] px-1 py-0.2 rounded bg-emerald-100 text-emerald-700 font-bold shrink-0">
-                              🟢 Kosong
-                            </span>
-                          ) : (
-                            <span className="text-[9px] px-1 py-0.2 rounded bg-amber-100 text-amber-800 font-bold shrink-0">
-                              {load.count} Truk
-                            </span>
-                          )}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
               </div>
 
               {/* Catatan / Keterangan Admin */}
               <div className="space-y-1.5">
-                <label className="font-bold text-slate-700">Catatan Staging / Instruksi Khusus</label>
+                <label className="font-bold text-slate-700">Catatan Staging / Instruksi Khusus (Opsional)</label>
                 <textarea
                   rows={2}
                   value={adminNotes1}
                   onChange={(e) => setAdminNotes1(e.target.value)}
-                  placeholder="Contoh: Muatan prioritas lini produksi 1, gunakan palet plastik."
+                  placeholder="Contoh: Muatan prioritas lini produksi 1, gunakan palet plastik atau tanki buffer."
                   className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 text-xs"
                 />
               </div>
@@ -918,24 +1064,41 @@ export const AdminView: React.FC = () => {
                 />
               </div>
 
-              <div className="pt-3 flex items-center justify-end gap-3">
+              {/* Two Action Buttons */}
+              <div className="pt-3 border-t border-slate-100 flex flex-col sm:flex-row items-stretch sm:items-center justify-end gap-2.5">
                 <button
                   type="button"
                   onClick={() => setVerifyingRecord(null)}
-                  className="px-4 py-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold cursor-pointer"
+                  className="px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold cursor-pointer text-xs sm:text-sm order-3 sm:order-1"
                 >
                   Batal
                 </button>
+
+                {/* Tombol B: Hold / Antri Mundur */}
                 <button
-                  type="submit"
-                  id="btn-confirm-verify-po"
-                  className="px-5 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-bold flex items-center gap-2 cursor-pointer shadow-sm"
+                  type="button"
+                  onClick={handleVerifyAndHold}
+                  id="btn-verify-hold-queue"
+                  className="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-bold flex items-center justify-center gap-2 cursor-pointer shadow-sm text-xs sm:text-sm order-2"
+                  title="Verifikasi dokumen dan simpan di antrean hold mundur"
+                >
+                  <PauseCircle className="w-4 h-4" />
+                  <span>Verifikasi &amp; Hold (Antri Mundur)</span>
+                </button>
+
+                {/* Tombol A: Langsung Mundur */}
+                <button
+                  type="button"
+                  onClick={handleVerifyAndDirect}
+                  id="btn-verify-direct-dock"
+                  className="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold flex items-center justify-center gap-2 cursor-pointer shadow-sm text-xs sm:text-sm order-1 sm:order-3"
+                  title="Verifikasi dokumen dan langsung izinkan armada mundur ke dock"
                 >
                   <Check className="w-4 h-4" />
-                  <span>Konfirmasi PO Ready (Catat T2)</span>
+                  <span>Verifikasi &amp; Langsung Mundur</span>
                 </button>
               </div>
-            </form>
+            </div>
           </div>
         </div>
       )}

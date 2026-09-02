@@ -145,9 +145,11 @@ export const WallboardModal: React.FC = () => {
             <Clock className="w-5 h-5" />
           </div>
           <div className="mt-3 text-4xl sm:text-5xl font-black font-mono text-amber-400">
-            {stats.waitingPO + stats.readyDock}
+            {stats.waitingPO + (stats.waitingDockQueue || 0) + stats.readyDock}
           </div>
-          <p className="text-xs text-amber-400/80 mt-2">{stats.waitingPO} Cek PO • {stats.readyDock} Ready Dock</p>
+          <p className="text-xs text-amber-400/80 mt-2">
+            {stats.waitingPO} Cek PO • {stats.waitingDockQueue || 0} Antri Mundur • {stats.readyDock} Ready Dock
+          </p>
         </div>
 
         <div className="bg-gradient-to-br from-slate-900 via-slate-900 to-purple-950/40 border-2 border-purple-500/60 rounded-3xl p-5 shadow-2xl">

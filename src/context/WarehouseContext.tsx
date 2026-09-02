@@ -52,12 +52,22 @@ interface WarehouseContextType {
   }) => Promise<UnloadingRecord>;
   
   verifyPOAndAssignDock: (id: string, data: {
-    poNumber: string;
     assignedDock: string;
+    poNumber?: string;
     adminNotes?: string;
     adminName?: string;
     suratJalanPhoto?: string;
   }) => Promise<void>;
+
+  verifyPOAndHold: (id: string, data: {
+    assignedDock: string;
+    poNumber?: string;
+    adminNotes?: string;
+    adminName?: string;
+    suratJalanPhoto?: string;
+  }) => Promise<void>;
+
+  releaseQueueToDock: (id: string) => Promise<void>;
   
   startUnloading: (id: string, operatorName: string) => Promise<void>;
   
@@ -326,6 +336,7 @@ export const WarehouseProvider: React.FC<{ children: ReactNode }> = ({ children 
   const stats = useMemo<OperationalStats>(() => {
     let totalToday = records.length;
     let waitingPO = 0;
+    let waitingDockQueue = 0;
     let readyDock = 0;
     let activeUnloading = 0;
     let waitingAdminVerification = 0;
@@ -340,6 +351,8 @@ export const WarehouseProvider: React.FC<{ children: ReactNode }> = ({ children 
       
       if (r.status === 'MENUNGGU_VERIFIKASI_PO') {
         waitingPO++;
+      } else if (r.status === 'WAITING_DOCK_QUEUE') {
+        waitingDockQueue++;
       } else if (r.status === 'PO_READY_DOCK_ASSIGNED') {
         readyDock++;
       } else if (r.status === 'SEDANG_BONGKAR') {
@@ -369,6 +382,7 @@ export const WarehouseProvider: React.FC<{ children: ReactNode }> = ({ children 
     return {
       totalToday,
       waitingPO,
+      waitingDockQueue,
       readyDock,
       activeUnloading,
       waitingAdminVerification,
@@ -437,10 +451,10 @@ export const WarehouseProvider: React.FC<{ children: ReactNode }> = ({ children 
     return newRecord;
   };
 
-  // Action: Admin Step 1 (Verify PO -> T2 & Assign Dock)
+  // Action: Admin Step 1 (Verify PO -> T2 & Assign Dock & Direct to Dock)
   const verifyPOAndAssignDock = async (id: string, data: {
-    poNumber: string;
     assignedDock: string;
+    poNumber?: string;
     adminNotes?: string;
     adminName?: string;
     suratJalanPhoto?: string;
@@ -453,7 +467,7 @@ export const WarehouseProvider: React.FC<{ children: ReactNode }> = ({ children 
         updatedItem = {
           ...item,
           t2PoReady: nowIso,
-          poNumber: data.poNumber.trim(),
+          poNumber: data.poNumber?.trim() || item.poNumber || '-',
           assignedDock: data.assignedDock.trim(),
           adminNotesStep1: data.adminNotes?.trim(),
           adminNameStep1: data.adminName?.trim() || authUser?.name || 'Admin Gudang',
@@ -474,6 +488,105 @@ export const WarehouseProvider: React.FC<{ children: ReactNode }> = ({ children 
         await saveRecordToGoogleSheets(updatedItem);
       } catch (err) {
         console.warn('GAS save error:', err);
+      } finally {
+        setIsSyncing(false);
+        setLastSyncTime(new Date().toLocaleTimeString('id-ID'));
+      }
+    }
+  };
+
+  // Action: Admin Step 1 Option B (Verify PO & Hold Area / Antri Mundur -> T2 recorded, status: WAITING_DOCK_QUEUE)
+  const verifyPOAndHold = async (id: string, data: {
+    assignedDock: string;
+    poNumber?: string;
+    adminNotes?: string;
+    adminName?: string;
+    suratJalanPhoto?: string;
+  }) => {
+    const nowIso = new Date().toISOString();
+    let updatedItem: UnloadingRecord | null = null;
+
+    const updated = records.map((item) => {
+      if (item.id === id) {
+        updatedItem = {
+          ...item,
+          t2PoReady: nowIso,
+          poNumber: data.poNumber?.trim() || item.poNumber || '-',
+          assignedDock: data.assignedDock.trim(),
+          adminNotesStep1: data.adminNotes?.trim(),
+          adminNameStep1: data.adminName?.trim() || authUser?.name || 'Admin Gudang',
+          suratJalanPhoto: data.suratJalanPhoto || item.suratJalanPhoto,
+          status: 'WAITING_DOCK_QUEUE',
+        };
+        return updatedItem;
+      }
+      return item;
+    });
+
+    setRecords(updated);
+    broadcastRecords(updated);
+
+    if (updatedItem) {
+      try {
+        setIsSyncing(true);
+        saveRecordToGoogleSheets(updatedItem).catch((e) => console.warn('GAS save item error:', e));
+        const resp = await fetch('/api/records/item', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ record: updatedItem }),
+        });
+        if (resp.ok) {
+          const resData = await resp.json();
+          if (resData.records) {
+            setRecords(resData.records);
+            broadcastRecords(resData.records);
+          }
+        }
+      } catch (err) {
+        console.warn('API sync error:', err);
+      } finally {
+        setIsSyncing(false);
+        setLastSyncTime(new Date().toLocaleTimeString('id-ID'));
+      }
+    }
+  };
+
+  // Action: Release from Antri Mundur to Ready Dock (WAITING_DOCK_QUEUE -> PO_READY_DOCK_ASSIGNED)
+  const releaseQueueToDock = async (id: string) => {
+    let updatedItem: UnloadingRecord | null = null;
+
+    const updated = records.map((item) => {
+      if (item.id === id) {
+        updatedItem = {
+          ...item,
+          status: 'PO_READY_DOCK_ASSIGNED' as const,
+        };
+        return updatedItem;
+      }
+      return item;
+    });
+
+    setRecords(updated);
+    broadcastRecords(updated);
+
+    if (updatedItem) {
+      try {
+        setIsSyncing(true);
+        saveRecordToGoogleSheets(updatedItem).catch((e) => console.warn('GAS save item error:', e));
+        const resp = await fetch('/api/records/item', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ record: updatedItem }),
+        });
+        if (resp.ok) {
+          const resData = await resp.json();
+          if (resData.records) {
+            setRecords(resData.records);
+            broadcastRecords(resData.records);
+          }
+        }
+      } catch (err) {
+        console.warn('API sync error:', err);
       } finally {
         setIsSyncing(false);
         setLastSyncTime(new Date().toLocaleTimeString('id-ID'));
@@ -670,6 +783,8 @@ export const WarehouseProvider: React.FC<{ children: ReactNode }> = ({ children 
         returnToPortal,
         addTruckGateIn,
         verifyPOAndAssignDock,
+        verifyPOAndHold,
+        releaseQueueToDock,
         startUnloading,
         operatorFinishUnloading,
         finishUnloading,
