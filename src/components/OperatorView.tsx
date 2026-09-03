@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { 
   HardHat, 
   Play, 
@@ -20,11 +20,43 @@ import {
   FileCheck,
   Image as ImageIcon,
   Check,
-  ArrowRightLeft
+  ArrowRightLeft,
+  FileText,
+  ExternalLink,
+  Eye
 } from 'lucide-react';
 import { useWarehouse } from '../context/WarehouseContext';
 import { formatShortTime, formatDateTime, calculateLeadTime, formatDuration } from '../utils/timeUtils';
 import { UnloadingRecord, WAREHOUSE_ZONES, WarehouseZone } from '../types';
+
+/**
+ * Helper untuk memeriksa apakah tautan foto tersimpan di Google Drive
+ */
+const isGoogleDriveUrl = (url?: string): boolean => {
+  if (!url) return false;
+  return (
+    url.includes('drive.google.com') ||
+    url.includes('googleusercontent.com') ||
+    url.includes('docs.google.com')
+  );
+};
+
+/**
+ * Helper untuk memastikan URL gambar dapat dirender di elemen <img> (baik base64 maupun Google Drive)
+ */
+const getDisplayableImageUrl = (url?: string): string => {
+  if (!url) return '';
+  // Jika Base64 data URL atau Blob URL, kembalikan langsung
+  if (url.startsWith('data:') || url.startsWith('blob:')) {
+    return url;
+  }
+  // Jika link Google Drive (/file/d/ID atau ?id=ID), konversi ke thumbnail image direct feed
+  const driveMatch = url.match(/\/file\/d\/([a-zA-Z0-9_-]+)/) || url.match(/id=([a-zA-Z0-9_-]+)/);
+  if (driveMatch && driveMatch[1]) {
+    return `https://drive.google.com/thumbnail?id=${driveMatch[1]}&sz=w1600`;
+  }
+  return url;
+};
 
 export const OperatorView: React.FC = () => {
   const { 
@@ -56,7 +88,25 @@ export const OperatorView: React.FC = () => {
   const [zoneChangeReason, setZoneChangeReason] = useState('');
   const [isSubmittingZoneChange, setIsSubmittingZoneChange] = useState(false);
 
+  // Modal State for Pratinjau Dokumen Surat Jalan
+  const [previewSuratJalanRecord, setPreviewSuratJalanRecord] = useState<UnloadingRecord | null>(null);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Listen for Escape key to close document preview modal
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setPreviewSuratJalanRecord(null);
+      }
+    };
+    if (previewSuratJalanRecord) {
+      window.addEventListener('keydown', handleKeyDown);
+    }
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [previewSuratJalanRecord]);
 
   // Trucks that are PO Ready (Ready to click Mulai Bongkar T3)
   const readyList = records.filter(r => r.status === 'PO_READY_DOCK_ASSIGNED');
@@ -331,10 +381,37 @@ export const OperatorView: React.FC = () => {
                         <span className="text-slate-500">No PO PPIC:</span>
                         <span className="font-mono text-slate-700">{rec.poNumber || '-'}</span>
                       </div>
+                      {rec.suratJalanNumber && (
+                        <div className="flex justify-between">
+                          <span className="text-slate-500">No. Surat Jalan:</span>
+                          <span className="font-mono text-slate-700">{rec.suratJalanNumber}</span>
+                        </div>
+                      )}
                       {rec.adminNotesStep1 && (
                         <p className="text-[11px] text-slate-500 italic pt-1 border-t border-slate-200">
                           Catatan Admin: &quot;{rec.adminNotesStep1}&quot;
                         </p>
+                      )}
+                    </div>
+
+                    {/* Dokumen Surat Jalan Preview Button / Status Badge (Sebelum Mulai Bongkar) */}
+                    <div className="pt-1">
+                      {rec.suratJalanPhoto ? (
+                        <button
+                          type="button"
+                          onClick={() => setPreviewSuratJalanRecord(rec)}
+                          id={`btn-preview-sj-${rec.id}`}
+                          className="w-full py-2 px-3 rounded-lg bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-800 font-bold text-xs flex items-center justify-center gap-2 transition cursor-pointer active:scale-[0.99] shadow-2xs"
+                          title="Lihat foto Surat Jalan yang telah diunggah oleh Admin"
+                        >
+                          <FileText className="w-4 h-4 text-blue-600 shrink-0" />
+                          <span>📄 Lihat Foto Dokumen / Surat Jalan</span>
+                        </button>
+                      ) : (
+                        <div className="flex items-center justify-center gap-1.5 py-1.5 px-3 text-xs text-slate-400 bg-slate-50 rounded-lg border border-dashed border-slate-200 font-medium">
+                          <FileText className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                          <span>Dokumen fisik (Tanpa lampiran foto)</span>
+                        </div>
                       )}
                     </div>
 
@@ -518,13 +595,34 @@ export const OperatorView: React.FC = () => {
                     </div>
                   )}
 
+                  {/* Dokumen Surat Jalan Preview Button / Status Badge (Selama Proses Bongkar) */}
+                  <div className="pt-1">
+                    {rec.suratJalanPhoto ? (
+                      <button
+                        type="button"
+                        onClick={() => setPreviewSuratJalanRecord(rec)}
+                        id={`btn-preview-sj-active-${rec.id}`}
+                        className="w-full py-2 px-3 rounded-lg bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-800 font-bold text-xs flex items-center justify-center gap-2 transition cursor-pointer active:scale-[0.99] shadow-2xs"
+                        title="Lihat foto Surat Jalan yang telah diunggah oleh Admin"
+                      >
+                        <FileText className="w-4 h-4 text-blue-600 shrink-0" />
+                        <span>📄 Lihat Foto Dokumen / Surat Jalan</span>
+                      </button>
+                    ) : (
+                      <div className="flex items-center justify-center gap-1.5 py-1.5 px-3 text-xs text-slate-400 bg-slate-50 rounded-lg border border-dashed border-slate-200 font-medium">
+                        <FileText className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                        <span>Dokumen fisik (Tanpa lampiran foto)</span>
+                      </div>
+                    )}
+                  </div>
+
                   {/* Operator Actions: Finish Unload / Selesai Bongkar */}
                   <div className="flex flex-col sm:flex-row items-center justify-between gap-2.5 pt-2 border-t border-slate-100">
                     <button
                       onClick={() => setSelectedRecord(rec)}
                       className="text-xs text-slate-600 hover:text-slate-900 font-semibold transition cursor-pointer"
                     >
-                      Lihat Dokumen
+                      Detail Dokumen
                     </button>
                     <button
                       onClick={() => handleOpenFinishModal(rec)}
@@ -675,6 +773,19 @@ export const OperatorView: React.FC = () => {
                   <span className="text-slate-500">Petugas / Regu Bongkar:</span>
                   <span className="text-slate-800 font-bold">{operatorName}</span>
                 </div>
+                {finishingRecord.suratJalanPhoto && (
+                  <div className="pt-2 border-t border-slate-200 flex items-center justify-between">
+                    <span className="text-slate-500 text-[11px]">Dokumen Surat Jalan:</span>
+                    <button
+                      type="button"
+                      onClick={() => setPreviewSuratJalanRecord(finishingRecord)}
+                      className="text-xs text-blue-700 hover:text-blue-800 font-bold flex items-center gap-1.5 cursor-pointer hover:underline"
+                    >
+                      <FileText className="w-3.5 h-3.5" />
+                      <span>📄 Lihat Foto Surat Jalan</span>
+                    </button>
+                  </div>
+                )}
               </div>
 
               {/* Optional Photo Upload: Foto Kondisi Barang / Dokumen Fisik */}
@@ -874,6 +985,153 @@ export const OperatorView: React.FC = () => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: PRATINJAU FOTO / DOKUMEN SURAT JALAN (PREVIEW VIEWER) */}
+      {previewSuratJalanRecord && (
+        <div 
+          className="fixed inset-0 z-50 bg-slate-900/75 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              setPreviewSuratJalanRecord(null);
+            }
+          }}
+        >
+          <div className="bg-white border border-slate-200 rounded-2xl max-w-2xl w-full p-4 sm:p-6 shadow-2xl space-y-4 my-auto animate-in fade-in zoom-in duration-200 text-slate-800 flex flex-col max-h-[92vh]">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 shrink-0">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-blue-50 text-blue-600">
+                  <FileText className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-black text-slate-900 text-base sm:text-lg">
+                      Pratinjau Surat Jalan
+                    </h3>
+                    <span className="font-mono text-xs font-bold px-2 py-0.5 rounded bg-blue-100 text-blue-800">
+                      {previewSuratJalanRecord.queueNumber}
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-500 font-medium">
+                    {previewSuratJalanRecord.supplierName} • {previewSuratJalanRecord.licensePlate} ({previewSuratJalanRecord.vehicleType})
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPreviewSuratJalanRecord(null)}
+                className="text-slate-400 hover:text-slate-700 p-1.5 rounded-lg hover:bg-slate-100 transition cursor-pointer"
+                title="Tutup Pratinjau (Esc / Klik X)"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Quick Metadata Bar */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 p-2.5 bg-slate-50 rounded-xl border border-slate-200 text-[11px] shrink-0">
+              <div>
+                <span className="text-slate-500 block">No. Surat Jalan:</span>
+                <span className="font-mono font-bold text-slate-800 truncate block">
+                  {previewSuratJalanRecord.suratJalanNumber || '-'}
+                </span>
+              </div>
+              <div>
+                <span className="text-slate-500 block">Zona / Dock:</span>
+                <span className="font-bold text-blue-700 truncate block">
+                  {previewSuratJalanRecord.assignedDock || '-'}
+                </span>
+              </div>
+              <div>
+                <span className="text-slate-500 block">Driver:</span>
+                <span className="font-semibold text-slate-800 truncate block">
+                  {previewSuratJalanRecord.driverName}
+                </span>
+              </div>
+              <div>
+                <span className="text-slate-500 block">No PO PPIC:</span>
+                <span className="font-mono font-semibold text-slate-800 truncate block">
+                  {previewSuratJalanRecord.poNumber || '-'}
+                </span>
+              </div>
+            </div>
+
+            {/* Image Viewer Container (Responsive on Mobile & Desktop) */}
+            <div className="flex-1 min-h-[260px] max-h-[56vh] bg-slate-950 rounded-xl p-2.5 flex items-center justify-center overflow-auto border border-slate-800 shadow-inner relative group">
+              {previewSuratJalanRecord.suratJalanPhoto ? (
+                <img
+                  src={getDisplayableImageUrl(previewSuratJalanRecord.suratJalanPhoto)}
+                  alt={`Surat Jalan ${previewSuratJalanRecord.queueNumber}`}
+                  className="max-h-[50vh] max-w-full object-contain rounded transition"
+                  loading="lazy"
+                />
+              ) : (
+                <div className="text-center p-8 text-slate-400 space-y-2">
+                  <FileText className="w-10 h-10 mx-auto text-slate-600" />
+                  <p className="text-xs font-bold">Tidak ada file foto terlampir.</p>
+                  <p className="text-[11px] text-slate-500">Pemeriksaan menggunakan dokumen fisik langsung dari driver.</p>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Actions Footer */}
+            <div className="pt-2 border-t border-slate-100 flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-between gap-2.5 shrink-0">
+              <span className="text-[11px] text-slate-500 text-center sm:text-left">
+                💡 Dokumen Surat Jalan dapat dizoom atau dibuka di tab baru untuk ketelitian pembacaan item PO.
+              </span>
+
+              <div className="flex items-center justify-end gap-2">
+                {/* Tombol Buka di Google Drive jika formatnya berupa link Google Drive */}
+                {isGoogleDriveUrl(previewSuratJalanRecord.suratJalanPhoto) && (
+                  <a
+                    href={previewSuratJalanRecord.suratJalanPhoto}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-3.5 py-2 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold text-xs flex items-center justify-center gap-1.5 border border-blue-200 transition cursor-pointer"
+                    title="Buka dokumen di tab Google Drive resolusi tinggi"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                    <span>Buka di Google Drive</span>
+                  </a>
+                )}
+
+                {/* Tombol Zoom Penuh untuk Base64 data URL */}
+                {!isGoogleDriveUrl(previewSuratJalanRecord.suratJalanPhoto) && previewSuratJalanRecord.suratJalanPhoto && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const imgWin = window.open('');
+                      if (imgWin) {
+                        imgWin.document.write(`
+                          <!DOCTYPE html>
+                          <html>
+                            <head><title>Surat Jalan ${previewSuratJalanRecord.queueNumber}</title></head>
+                            <body style="margin:0;background:#0f172a;display:flex;align-items:center;justify-content:center;min-height:100vh;">
+                              <img src="${previewSuratJalanRecord.suratJalanPhoto}" style="max-width:100%;max-height:100vh;object-fit:contain;" />
+                            </body>
+                          </html>
+                        `);
+                        imgWin.document.close();
+                      }
+                    }}
+                    className="px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                    <span>Zoom Penuh</span>
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => setPreviewSuratJalanRecord(null)}
+                  className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs transition cursor-pointer"
+                >
+                  Tutup
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

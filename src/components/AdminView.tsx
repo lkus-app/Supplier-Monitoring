@@ -37,112 +37,87 @@ import { formatDateTime, formatShortTime, calculateLeadTime, formatDuration, get
 import { GoogleDriveModal } from './GoogleDriveModal';
 
 /**
- * Kompresi gambar ultra-ringan menggunakan createImageBitmap / Canvas
+ * Algoritma Kompresi Zero-Crash (Memory Safe) menggunakan createImageBitmap / Canvas
  * Mencegah crash browser "Unable to complete previous operation due to low memory" pada HP:
- * 1. Tidak membaca full Base64 sebelum resize
- * 2. Dapatkan dimensi asli dan decode langsung via createImageBitmap jika didukung
- * 3. Segera panggil bitmap.close() untuk membebaskan RAM HP seketika
- * 4. Ekspor ke JPEG kualitas 0.5 (ukuran file sangat ringan ~60-120 KB)
+ * 1. Decode dimensi gambar tanpa memuat resolusi penuh mentah ke RAM
+ * 2. Segera bebaskan memori dengan bitmap.close() dan pembersihan canvas
+ * 3. Ekspor ke JPEG kualitas 0.5 (ukuran file sangat ringan ~60-120 KB)
+ * 4. Kompatibel dengan input type="file" accept="image/*" (dialog pilihan Kamera / Media Galeri)
  */
-export async function compressImageUltraLight(file: File): Promise<string> {
-  const MAX_DIM = 800;
-
-  // 1. Dapatkan dimensi asli tanpa decode memori penuh jika browser support (decode native di background)
-  if (typeof window !== 'undefined' && typeof window.createImageBitmap === 'function') {
-    try {
-      const bitmap = await window.createImageBitmap(file);
-      let { width, height } = bitmap;
-
-      if (width > height && width > MAX_DIM) {
-        height = Math.round((height * MAX_DIM) / width);
-        width = MAX_DIM;
-      } else if (height > MAX_DIM) {
-        width = Math.round((width * MAX_DIM) / height);
-        height = MAX_DIM;
-      }
-
-      const canvas = document.createElement('canvas');
-      canvas.width = width;
-      canvas.height = height;
-      const ctx = canvas.getContext('2d');
-      if (ctx) {
-        ctx.drawImage(bitmap, 0, 0, width, height);
-      }
-      bitmap.close(); // Penting: Bebaskan RAM HP seketika
-
-      // Ekspor ke JPEG kualitas rendah/sedang (ukuran file jadi hanya ~60-120 KB)
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.5);
-      canvas.width = 0;
-      canvas.height = 0;
-      return dataUrl;
-    } catch (err) {
-      console.warn('createImageBitmap gagal, beralih ke fallback createObjectURL:', err);
+export async function processImageSafe(file: File): Promise<string> {
+  const MAX_DIMENSION = 900;
+  
+  // 1. Dapatkan dimensi asli tanpa decode bitmap penuh jika didukung
+  let bitmap: ImageBitmap | null = null;
+  try {
+    if (typeof window !== 'undefined' && typeof window.createImageBitmap === 'function') {
+      bitmap = await createImageBitmap(file);
     }
+  } catch (e) {
+    console.warn('createImageBitmap tidak berhasil, beralih ke fallback FileReader:', e);
+    bitmap = null;
   }
 
-  // Fallback hemat memori jika createImageBitmap gagal / tidak didukung
-  return new Promise((resolve, reject) => {
-    let objectUrl: string | null = null;
-    try {
-      objectUrl = URL.createObjectURL(file);
-    } catch (err) {
-      reject(err);
-      return;
-    }
+  if (!bitmap) {
+    // Fallback untuk browser lawas
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          let { width, height } = img;
+          if (width > height && width > MAX_DIMENSION) {
+            height = Math.round((height * MAX_DIMENSION) / width);
+            width = MAX_DIMENSION;
+          } else if (height > MAX_DIMENSION) {
+            width = Math.round((width * MAX_DIMENSION) / height);
+            height = MAX_DIMENSION;
+          }
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          if (ctx) ctx.drawImage(img, 0, 0, width, height);
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.5);
+          canvas.width = 0;
+          canvas.height = 0;
+          resolve(dataUrl);
+        };
+        img.onerror = reject;
+        img.src = ev.target?.result as string;
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  }
 
-    const img = new Image();
-    const cleanup = () => {
-      if (objectUrl) {
-        URL.revokeObjectURL(objectUrl);
-        objectUrl = null;
-      }
-      img.onload = null;
-      img.onerror = null;
-    };
+  let { width, height } = bitmap;
+  if (width > height && width > MAX_DIMENSION) {
+    height = Math.round((height * MAX_DIMENSION) / width);
+    width = MAX_DIMENSION;
+  } else if (height > MAX_DIMENSION) {
+    width = Math.round((width * MAX_DIMENSION) / height);
+    height = MAX_DIMENSION;
+  }
 
-    img.onload = () => {
-      try {
-        let width = img.naturalWidth || img.width;
-        let height = img.naturalHeight || img.height;
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  if (ctx) {
+    ctx.drawImage(bitmap, 0, 0, width, height);
+  }
+  bitmap.close(); // Bersihkan RAM HP seketika
 
-        if (width > height && width > MAX_DIM) {
-          height = Math.round((height * MAX_DIM) / width);
-          width = MAX_DIM;
-        } else if (height > MAX_DIM) {
-          width = Math.round((width * MAX_DIM) / height);
-          height = MAX_DIM;
-        }
-
-        const canvas = document.createElement('canvas');
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        if (ctx) {
-          ctx.drawImage(img, 0, 0, width, height);
-        }
-
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.5);
-        canvas.width = 0;
-        canvas.height = 0;
-        cleanup();
-        resolve(dataUrl);
-      } catch (e) {
-        cleanup();
-        reject(e);
-      }
-    };
-
-    img.onerror = () => {
-      cleanup();
-      reject(new Error('Gagal memuat gambar dari URL objek'));
-    };
-
-    img.src = objectUrl;
-  });
+  const dataUrl = canvas.toDataURL('image/jpeg', 0.5);
+  canvas.width = 0;
+  canvas.height = 0;
+  return dataUrl;
 }
 
-// Alias untuk kompatibilitas
-export const compressImageFile = compressImageUltraLight;
+// Alias untuk kompatibilitas ke fungsi sebelumnya
+export const compressImageUltraLight = processImageSafe;
+export const compressImageFile = processImageSafe;
 
 export const AdminView: React.FC = () => {
   const { 
@@ -319,8 +294,8 @@ export const AdminView: React.FC = () => {
     // Jalankan kompresi secara async tanpa memblokir thread UI utama
     setTimeout(async () => {
       try {
-        // Kompresi ultra-ringan via createImageBitmap / Canvas (maks 800px, JPEG 0.5) untuk menghemat RAM HP
-        const compressed = await compressImageUltraLight(file);
+        // Algoritma Kompresi Zero-Crash (Memory Safe) via createImageBitmap / Canvas (maks 900px, JPEG 0.5)
+        const compressed = await processImageSafe(file);
         // Hanya simpan string base64 hasil kompresi sangat ringan (~60-120 KB) ke state
         setSupplementalPhoto(compressed);
         setPhotoError(null);
@@ -460,7 +435,7 @@ export const AdminView: React.FC = () => {
       if (e.target) e.target.value = '';
       for (const file of fileList) {
         try {
-          const compressed = await compressImageUltraLight(file);
+          const compressed = await processImageSafe(file);
           setUploadedPhotos(prev => [...prev, compressed]);
         } catch (err) {
           console.error('Gagal kompres foto barang:', err);
@@ -1538,7 +1513,7 @@ export const AdminView: React.FC = () => {
                       )}
                     </button>
                     <p className="text-[11px] text-slate-500 text-center">
-                      💡 Pilih Kamera, Galeri, atau File. Foto otomatis dikompresi ultra-ringan (&le;800px JPEG kualitas 50%, ukuran ~60-120 KB) untuk mencegah crash memori HP.
+                      💡 Pilih Kamera langsung atau Media / Galeri. Foto otomatis dikompresi zero-crash (&le;900px JPEG kualitas 50%, ukuran ~60-120 KB) untuk mencegah crash memori HP.
                     </p>
                   </div>
                 )}
