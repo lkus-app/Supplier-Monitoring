@@ -113,6 +113,7 @@ export type QueueStatus =
   | 'MENUNGGU_VERIFIKASI_ADMIN'  // Alias
   | 'SELESAI_BONGKAR'        // T4 final recorded, finalized
   | 'FINISHED'               // Alias
+  | 'COMPLETED'              // Alias Selesai
   | 'CANCELLED';             // Dibatalkan oleh Supervisor (SPV)
 
 export type UnloadingStatus = QueueStatus;

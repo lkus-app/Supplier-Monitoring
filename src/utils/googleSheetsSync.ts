@@ -74,7 +74,7 @@ async function compressImageIfBase64(base64Str?: string): Promise<string | undef
       if (!ctx) return resolve(base64Str);
       
       ctx.drawImage(img, 0, 0, width, height);
-      resolve(canvas.toDataURL('image/jpeg', 0.6)); // kompres kualitas 60%
+      resolve(canvas.toDataURL('image/jpeg', 0.5)); // kompres kualitas 50% (< 150KB)
     };
     img.onerror = () => resolve(base64Str);
   });
@@ -91,10 +91,15 @@ export async function saveRecordToGoogleSheets(record: UnloadingRecord): Promise
   const url = getGoogleAppsScriptUrl();
 
   try {
-    // Kompres foto surat jalan jika ada agar tidak gagal kirim karena payload terlalu besar
+    // Kompres foto surat jalan dan foto barang jika ada agar tidak gagal kirim karena payload terlalu besar
     const compressedRecord = { ...record };
     if (compressedRecord.suratJalanPhoto) {
       compressedRecord.suratJalanPhoto = await compressImageIfBase64(compressedRecord.suratJalanPhoto);
+    }
+    if (compressedRecord.goodsPhotos && Array.isArray(compressedRecord.goodsPhotos)) {
+      compressedRecord.goodsPhotos = await Promise.all(
+        compressedRecord.goodsPhotos.map(p => compressImageIfBase64(p).then(res => res || p))
+      );
     }
 
     const payload = {

@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useMemo, ReactNode, useCallback, useRef } from 'react';
-import { UnloadingRecord, RoleType, AppViewType, AuthUser, DEMO_ACCOUNTS, OperationalStats, GoodsCondition, VehicleType, WarehouseZone } from '../types';
+import { UnloadingRecord, RoleType, AppViewType, AuthUser, DEMO_ACCOUNTS, OperationalStats, GoodsCondition, VehicleType, WarehouseZone, QueueStatus, UnloadingStatus } from '../types';
 import { calculateLeadTime, getLocalDateString, isRecordToday } from '../utils/timeUtils';
 import {
   fetchRecordsFromGoogleSheets,
@@ -95,6 +95,22 @@ interface WarehouseContextType {
     adminFinalNotes?: string;
     goodsPhotos?: string[];
     adminName?: string;
+    adminNameStep2?: string;
+    suratJalanPhoto?: string;
+    t4UnloadingFinish?: string;
+    status?: UnloadingStatus;
+  }) => Promise<void>;
+
+  completeAdminFinalVerification: (id: string, data: {
+    operatorCount: number;
+    goodsCondition: GoodsCondition;
+    adminFinalNotes?: string;
+    goodsPhotos?: string[];
+    adminName?: string;
+    adminNameStep2?: string;
+    suratJalanPhoto?: string;
+    t4UnloadingFinish?: string;
+    status?: UnloadingStatus;
   }) => Promise<void>;
   
   cancelRecord: (id: string, reason: string, notes?: string, spvName?: string) => Promise<void>;
@@ -228,12 +244,44 @@ export const WarehouseProvider: React.FC<{ children: ReactNode }> = ({ children 
     refreshDataFromServer();
   };
 
+  const recentLocalUpdatesRef = useRef<Map<string, { timestamp: number; record: UnloadingRecord }>>(new Map());
+
   // Fetch all records directly from Google Sheets via Apps Script
   const refreshDataFromServer = useCallback(async () => {
     try {
       const gasResult = await fetchRecordsFromGoogleSheets();
       if (gasResult && gasResult.success && Array.isArray(gasResult.records)) {
-        setRecords(gasResult.records);
+        const now = Date.now();
+        // Bersihkan update lokal yang sudah kadaluarsa (> 25 detik)
+        for (const [id, val] of recentLocalUpdatesRef.current.entries()) {
+          if (now - val.timestamp > 25000) {
+            recentLocalUpdatesRef.current.delete(id);
+          }
+        }
+
+        // Merge data server dengan data lokal yang baru di-update agar status tidak reset/rollback
+        const mergedRecords = gasResult.records.map((serverRec) => {
+          const localUpdate = recentLocalUpdatesRef.current.get(serverRec.id);
+          if (localUpdate) {
+            // Jika status server sudah mencapai status lokal, bersihkan dari pending
+            if (serverRec.status === localUpdate.record.status) {
+              recentLocalUpdatesRef.current.delete(serverRec.id);
+              return serverRec;
+            }
+            // Jika server masih memuat status lama (stale Google Sheets cache), pertahankan data lokal
+            return localUpdate.record;
+          }
+          return serverRec;
+        });
+
+        // Sertakan juga record lokal yang belum sempat masuk ke list fetch server
+        for (const [id, val] of recentLocalUpdatesRef.current.entries()) {
+          if (!mergedRecords.some(r => r.id === id)) {
+            mergedRecords.unshift(val.record);
+          }
+        }
+
+        setRecords(mergedRecords);
         setLastSyncTime(new Date().toLocaleTimeString('id-ID'));
       }
     } catch (gasErr) {
@@ -872,49 +920,67 @@ export const WarehouseProvider: React.FC<{ children: ReactNode }> = ({ children 
     }
   };
 
-  // Action: Admin Step 2 (Finalize Unloading -> T4 Final)
+  // Action: Admin Step 2 (Finalize Unloading -> T4 Final / Verifikasi Final)
   const finishUnloading = async (id: string, data: {
     operatorCount: number;
     goodsCondition: GoodsCondition;
     adminFinalNotes?: string;
     goodsPhotos?: string[];
     adminName?: string;
+    adminNameStep2?: string;
+    suratJalanPhoto?: string;
+    t4UnloadingFinish?: string;
+    status?: UnloadingStatus;
   }) => {
-    const nowIso = new Date().toISOString();
+    const nowIso = data.t4UnloadingFinish || new Date().toISOString();
     let updatedItem: UnloadingRecord | null = null;
+
+    // Normalisasi status ke SELESAI_BONGKAR
+    const finalStatus: QueueStatus = 'SELESAI_BONGKAR';
 
     const updated = records.map((item) => {
       if (item.id === id) {
         updatedItem = {
           ...item,
           t4UnloadingFinish: nowIso,
-          operatorCount: data.operatorCount,
+          operatorCount: Number(data.operatorCount) || 1,
           goodsCondition: data.goodsCondition,
           adminFinalNotes: data.adminFinalNotes?.trim(),
           goodsPhotos: data.goodsPhotos && data.goodsPhotos.length > 0 ? data.goodsPhotos : item.goodsPhotos,
-          adminNameStep2: data.adminName?.trim() || authUser?.name || 'Admin Gudang',
-          status: 'SELESAI_BONGKAR',
+          suratJalanPhoto: data.suratJalanPhoto !== undefined ? data.suratJalanPhoto : item.suratJalanPhoto,
+          adminNameStep2: (data.adminNameStep2 || data.adminName)?.trim() || authUser?.name || 'Admin Gudang',
+          status: finalStatus,
         };
         return updatedItem;
       }
       return item;
     });
 
+    // 1. Pembaruan state lokal (optimistic update) seketika agar kartu langsung berpindah ke status Selesai ('COMPLETED' / 'SELESAI_BONGKAR')
     setRecords(updated);
     broadcastRecords(updated);
 
     if (updatedItem) {
+      // Kunci data lokal di recentLocalUpdatesRef agar polling latar belakang tidak mereset UI
+      recentLocalUpdatesRef.current.set(id, { timestamp: Date.now(), record: updatedItem });
+
+      // 2. Kirim payload ke Google Apps Script via upsertItem (saveRecordToGoogleSheets)
       try {
         setIsSyncing(true);
-        await saveRecordToGoogleSheets(updatedItem);
+        const gasRes = await saveRecordToGoogleSheets(updatedItem);
+        if (!gasRes.success && gasRes.error) {
+          console.warn('GAS upsertItem warning:', gasRes.error);
+        }
       } catch (err) {
-        console.warn('GAS save error:', err);
+        console.warn('GAS save error (Verifikasi Final):', err);
       } finally {
         setIsSyncing(false);
         setLastSyncTime(new Date().toLocaleTimeString('id-ID'));
       }
     }
   };
+
+  const completeAdminFinalVerification = finishUnloading;
 
   // Action: Cancel Unloading / Batalkan Bongkaran (Khusus Supervisor / SPV)
   const cancelRecord = async (id: string, reason: string, notes?: string, spvName?: string) => {
@@ -1032,6 +1098,7 @@ export const WarehouseProvider: React.FC<{ children: ReactNode }> = ({ children 
         rejectZoneChange,
         operatorFinishUnloading,
         finishUnloading,
+        completeAdminFinalVerification,
         cancelRecord,
         deleteRecord,
         clearAllData,

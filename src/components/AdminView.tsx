@@ -45,7 +45,7 @@ import { GoogleDriveModal } from './GoogleDriveModal';
  * 4. Kompatibel dengan input type="file" accept="image/*" (dialog pilihan Kamera / Media Galeri)
  */
 export async function processImageSafe(file: File): Promise<string> {
-  const MAX_DIMENSION = 900;
+  const MAX_DIMENSION = 800; // max dimensi 800px sesuai instruksi kompresi ringan (< 150KB)
   
   // 1. Dapatkan dimensi asli tanpa decode bitmap penuh jika didukung
   let bitmap: ImageBitmap | null = null;
@@ -127,6 +127,7 @@ export const AdminView: React.FC = () => {
     verifyPOAndHold,
     releaseQueueToDock,
     finishUnloading, 
+    completeAdminFinalVerification,
     setSelectedRecord,
     setActiveRole,
     returnToPortal,
@@ -225,6 +226,8 @@ export const AdminView: React.FC = () => {
   const [adminName2, setAdminName2] = useState(authUser?.name || 'Admin WH CKL');
   const [uploadedPhotos, setUploadedPhotos] = useState<string[]>([]);
   const [previewPhotoModal, setPreviewPhotoModal] = useState<string | null>(null);
+  const [isSubmittingFinalize, setIsSubmittingFinalize] = useState(false);
+  const [isCompressingPhoto2, setIsCompressingPhoto2] = useState(false);
 
   // Refs untuk input Kamera HP langsung (capture="environment") vs Galeri/File HP
   const cameraInputRef1 = useRef<HTMLInputElement>(null);
@@ -460,27 +463,45 @@ export const AdminView: React.FC = () => {
     setUploadedPhotos(rec.goodsPhotos || rec.operatorPhotos || []);
   };
 
-  // Handle submit Step 2 (Finalize Bongkar -> T4)
-  const handleSubmitFinalize = (e: React.FormEvent) => {
+  // Handle submit Step 2 (Finalize Bongkar -> T4) / Verifikasi Final
+  const handleSubmitFinalize = async (e: React.FormEvent) => {
     e.preventDefault();
+    e.stopPropagation();
+    if (isSubmittingFinalize) return;
     if (!finalizingRecord) return;
     if (!operatorCount || operatorCount <= 0) {
       alert('Mohon masukkan Jumlah Operator Bongkar (minimal 1).');
       return;
     }
 
-    finishUnloading(finalizingRecord.id, {
-      operatorCount,
-      goodsCondition,
-      adminFinalNotes,
-      goodsPhotos: uploadedPhotos.length > 0 ? uploadedPhotos : undefined,
-      adminName: adminName2,
-    });
+    try {
+      setIsSubmittingFinalize(true);
+      // Pastikan foto sudah dikompresi ringan (< 150KB) sebelum dikirim
+      await completeAdminFinalVerification(finalizingRecord.id, {
+        goodsCondition,
+        operatorCount: Number(operatorCount) || 1,
+        adminFinalNotes,
+        adminNameStep2: adminName2,
+        goodsPhotos: uploadedPhotos.length > 0 ? uploadedPhotos : undefined,
+        suratJalanPhoto: finalizingRecord.suratJalanPhoto || '',
+        t4UnloadingFinish: new Date().toISOString(),
+        status: 'COMPLETED',
+      });
 
-    setActionToast(`Bongkaran ${finalizingRecord.queueNumber} berhasil difinalisasi (T4 Selesai).`);
-    setTimeout(() => setActionToast(null), 5000);
-    setFinalizingRecord(null);
+      // Tutup modal hanya setelah proses simpan berhasil
+      setFinalizingRecord(null);
+      alert(`✅ Verifikasi final berhasil disimpan! Antrean ${finalizingRecord.queueNumber} kini berstatus Selesai.`);
+      setActionToast(`✅ Verifikasi final ${finalizingRecord.queueNumber} (${finalizingRecord.supplierName}) berhasil disimpan!`);
+      setTimeout(() => setActionToast(null), 5000);
+    } catch (err) {
+      console.error('Gagal menyimpan verifikasi final:', err);
+      alert('❌ Gagal menyimpan verifikasi final: ' + (err as Error).message);
+    } finally {
+      setIsSubmittingFinalize(false);
+    }
   };
+
+  const handleFinalSubmit = handleSubmitFinalize;
 
   // Add sample / camera condition photo
   const handleAddSampleProofPhoto = () => {
@@ -499,15 +520,18 @@ export const AdminView: React.FC = () => {
     if (files && files.length > 0) {
       const fileList: File[] = Array.from(files);
       if (e.target) e.target.value = '';
-      for (const file of fileList) {
-        try {
+      setIsCompressingPhoto2(true);
+      try {
+        for (const file of fileList) {
           const compressed = await processImageSafe(file);
           setUploadedPhotos(prev => [...prev, compressed]);
-        } catch (err) {
-          console.error('Gagal kompres foto barang:', err);
-          setActionToast('Gagal memuat foto, silakan coba ambil ulang dengan resolusi lebih rendah');
-          setTimeout(() => setActionToast(null), 6000);
         }
+      } catch (err) {
+        console.error('Gagal kompres foto barang:', err);
+        setActionToast('Gagal memuat foto, silakan coba ambil ulang dengan resolusi lebih rendah');
+        setTimeout(() => setActionToast(null), 6000);
+      } finally {
+        setIsCompressingPhoto2(false);
       }
     }
   };
@@ -1716,8 +1740,12 @@ export const AdminView: React.FC = () => {
                 </div>
               </div>
               <button
-                onClick={() => setFinalizingRecord(null)}
-                className="text-slate-400 hover:text-slate-700 p-1.5 rounded-lg hover:bg-slate-100 transition cursor-pointer"
+                type="button"
+                disabled={isSubmittingFinalize}
+                onClick={() => {
+                  if (!isSubmittingFinalize) setFinalizingRecord(null);
+                }}
+                className="text-slate-400 hover:text-slate-700 p-1.5 rounded-lg hover:bg-slate-100 transition cursor-pointer disabled:opacity-40"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -1875,27 +1903,36 @@ export const AdminView: React.FC = () => {
                   <p className="text-[11px] text-slate-400 italic">Belum ada foto yang diunggah.</p>
                 )}
 
+                {isCompressingPhoto2 && (
+                  <div className="flex items-center gap-2 p-2 rounded-lg bg-blue-50 text-blue-700 text-xs font-semibold animate-pulse border border-blue-200">
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Sedang mengompresi foto &lt; 150KB...</span>
+                  </div>
+                )}
+
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   <button
                     type="button"
+                    disabled={isSubmittingFinalize || isCompressingPhoto2}
                     onClick={(e) => {
                       e.preventDefault();
                       e.stopPropagation();
                       cameraInputRef2.current?.click();
                     }}
-                    className="flex items-center justify-center gap-2 p-2.5 rounded-lg border-2 border-dashed border-emerald-400 bg-emerald-50/70 hover:bg-emerald-100 text-emerald-800 text-xs font-bold cursor-pointer transition active:scale-[0.98]"
+                    className="flex items-center justify-center gap-2 p-2.5 rounded-lg border-2 border-dashed border-emerald-400 bg-emerald-50/70 hover:bg-emerald-100 text-emerald-800 text-xs font-bold cursor-pointer transition active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <Camera className="w-4 h-4 text-emerald-600 shrink-0" />
                     <span>📷 Kamera HP</span>
                   </button>
                   <button
                     type="button"
+                    disabled={isSubmittingFinalize || isCompressingPhoto2}
                     onClick={(e) => {
                       e.preventDefault();
                       e.stopPropagation();
                       galleryInputRef2.current?.click();
                     }}
-                    className="flex items-center justify-center gap-2 p-2.5 rounded-lg border border-dashed border-slate-300 bg-slate-50 hover:bg-slate-100 text-slate-700 text-xs font-bold cursor-pointer transition active:scale-[0.98]"
+                    className="flex items-center justify-center gap-2 p-2.5 rounded-lg border border-dashed border-slate-300 bg-slate-50 hover:bg-slate-100 text-slate-700 text-xs font-bold cursor-pointer transition active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <Upload className="w-4 h-4 text-slate-500 shrink-0" />
                     <span>🖼️ Galeri / File</span>
@@ -1931,26 +1968,40 @@ export const AdminView: React.FC = () => {
                 <input
                   type="text"
                   value={adminName2}
+                  disabled={isSubmittingFinalize}
                   onChange={(e) => setAdminName2(e.target.value)}
-                  className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-slate-900 text-xs"
+                  className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-slate-900 text-xs disabled:bg-slate-100 disabled:text-slate-500"
                 />
               </div>
 
               <div className="pt-3 flex items-center justify-end gap-3 border-t border-slate-100">
                 <button
                   type="button"
-                  onClick={() => setFinalizingRecord(null)}
-                  className="px-4 py-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold cursor-pointer"
+                  disabled={isSubmittingFinalize}
+                  onClick={() => {
+                    if (!isSubmittingFinalize) setFinalizingRecord(null);
+                  }}
+                  className="px-4 py-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed text-xs sm:text-sm"
                 >
                   Batal
                 </button>
                 <button
                   type="submit"
                   id="btn-confirm-finalize"
-                  className="px-5 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold flex items-center gap-2 cursor-pointer shadow-md text-xs sm:text-sm"
+                  disabled={isSubmittingFinalize || isCompressingPhoto2}
+                  className="px-5 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold flex items-center gap-2 cursor-pointer shadow-md text-xs sm:text-sm disabled:opacity-50 disabled:cursor-not-allowed transition"
                 >
-                  <CheckCircle2 className="w-4 h-4" />
-                  <span>Finalisasi &amp; Tutup Dokumen (T4)</span>
+                  {isSubmittingFinalize ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                      <span>⏳ Menyimpan &amp; Mengunggah Foto...</span>
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle2 className="w-4 h-4" />
+                      <span>Verifikasi Final &amp; Tutup Dokumen (T4)</span>
+                    </>
+                  )}
                 </button>
               </div>
             </form>
