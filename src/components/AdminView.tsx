@@ -220,8 +220,12 @@ export const AdminView: React.FC = () => {
   const [uploadedPhotos, setUploadedPhotos] = useState<string[]>([]);
   const [previewPhotoModal, setPreviewPhotoModal] = useState<string | null>(null);
 
-  const fileInputRef1 = useRef<HTMLInputElement>(null);
-  const fileInputRef2 = useRef<HTMLInputElement>(null);
+  // Refs untuk input Kamera HP langsung (capture="environment") vs Galeri/File HP
+  const cameraInputRef1 = useRef<HTMLInputElement>(null);
+  const galleryInputRef1 = useRef<HTMLInputElement>(null);
+
+  const cameraInputRef2 = useRef<HTMLInputElement>(null);
+  const galleryInputRef2 = useRef<HTMLInputElement>(null);
 
   // Filtered lists
   const waitingPOList = records.filter(r => r.status === 'MENUNGGU_VERIFIKASI_PO');
@@ -314,8 +318,11 @@ export const AdminView: React.FC = () => {
   const handleRemoveSuratJalanPhoto = () => {
     setSupplementalPhoto(null);
     setPhotoError(null);
-    if (fileInputRef1.current) {
-      fileInputRef1.current.value = '';
+    if (cameraInputRef1.current) {
+      cameraInputRef1.current.value = '';
+    }
+    if (galleryInputRef1.current) {
+      galleryInputRef1.current.value = '';
     }
   };
 
@@ -1449,28 +1456,34 @@ export const AdminView: React.FC = () => {
                         <p className="text-[11px] text-slate-500">
                           Format JPEG terkompresi otomatis (&le;800px, 50%) agar hemat RAM HP &amp; cepat terunggah (~60-120 KB).
                         </p>
-                        <div className="flex items-center gap-2 pt-1">
+                        <div className="flex items-center gap-2 pt-1 flex-wrap">
                           <button
                             type="button"
                             onClick={(e) => {
                               e.preventDefault();
                               e.stopPropagation();
-                              fileInputRef1.current?.click();
+                              cameraInputRef1.current?.click();
                             }}
                             disabled={isCompressingPhoto}
-                            className="inline-flex items-center gap-1 text-[11px] px-2.5 py-1 rounded-lg bg-blue-50 text-blue-700 hover:bg-blue-100 font-semibold cursor-pointer transition border border-blue-200 disabled:opacity-60 disabled:cursor-not-allowed"
+                            className="inline-flex items-center gap-1.5 text-[11px] px-2.5 py-1.5 rounded-lg bg-blue-50 text-blue-700 hover:bg-blue-100 font-bold cursor-pointer transition border border-blue-200 disabled:opacity-60 disabled:cursor-not-allowed"
+                            title="Ambil foto ulang menggunakan kamera HP"
                           >
-                            {isCompressingPhoto ? (
-                              <>
-                                <div className="w-3 h-3 border-2 border-blue-600 border-t-transparent rounded-full animate-spin shrink-0" />
-                                <span>Mengompresi...</span>
-                              </>
-                            ) : (
-                              <>
-                                <RefreshCw className="w-3 h-3 shrink-0" />
-                                <span>Ganti Foto</span>
-                              </>
-                            )}
+                            <Camera className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                            <span>Kamera HP</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              galleryInputRef1.current?.click();
+                            }}
+                            disabled={isCompressingPhoto}
+                            className="inline-flex items-center gap-1.5 text-[11px] px-2.5 py-1.5 rounded-lg bg-slate-100 text-slate-700 hover:bg-slate-200 font-bold cursor-pointer transition border border-slate-200 disabled:opacity-60 disabled:cursor-not-allowed"
+                            title="Ganti foto dari galeri atau file"
+                          >
+                            <ImageIcon className="w-3.5 h-3.5 text-slate-600 shrink-0" />
+                            <span>Galeri / File</span>
                           </button>
                           <button
                             type="button"
@@ -1479,9 +1492,9 @@ export const AdminView: React.FC = () => {
                               e.stopPropagation();
                               handleRemoveSuratJalanPhoto();
                             }}
-                            className="inline-flex items-center gap-1 text-[11px] px-2.5 py-1 rounded-lg bg-red-50 text-red-700 hover:bg-red-100 font-semibold cursor-pointer transition border border-red-200"
+                            className="inline-flex items-center gap-1.5 text-[11px] px-2.5 py-1.5 rounded-lg bg-red-50 text-red-700 hover:bg-red-100 font-bold cursor-pointer transition border border-red-200"
                           >
-                            <Trash2 className="w-3 h-3" />
+                            <Trash2 className="w-3.5 h-3.5" />
                             <span>Hapus Foto</span>
                           </button>
                         </div>
@@ -1489,39 +1502,78 @@ export const AdminView: React.FC = () => {
                     </div>
                   </div>
                 ) : (
-                  <div className="space-y-1.5">
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        fileInputRef1.current?.click();
-                      }}
-                      disabled={isCompressingPhoto}
-                      className="w-full flex items-center justify-center gap-2 p-3 rounded-xl border border-dashed border-blue-300 bg-white hover:bg-blue-50/70 text-blue-700 font-bold text-xs sm:text-sm cursor-pointer transition hover:border-blue-400 shadow-2xs disabled:opacity-70 disabled:cursor-not-allowed"
-                    >
-                      {isCompressingPhoto ? (
-                        <div className="flex items-center gap-2 py-0.5">
+                  <div className="space-y-2">
+                    {/* Dua Opsi Jelas: Kamera HP Langsung vs Galeri HP */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                      {/* Opsi 1: Kamera HP Langsung */}
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          cameraInputRef1.current?.click();
+                        }}
+                        disabled={isCompressingPhoto}
+                        id="btn-foto-kamera-sj"
+                        className="flex items-center justify-center gap-2 p-3 rounded-xl border-2 border-dashed border-blue-400 bg-blue-50/80 hover:bg-blue-100/90 text-blue-800 font-bold text-xs sm:text-sm cursor-pointer transition shadow-2xs active:scale-[0.98] disabled:opacity-70 disabled:cursor-not-allowed"
+                      >
+                        {isCompressingPhoto ? (
                           <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin shrink-0" />
-                          <span className="text-blue-800 font-bold">Sedang mengompresi foto Surat Jalan...</span>
-                        </div>
-                      ) : (
-                        <>
+                        ) : (
                           <Camera className="w-4 h-4 text-blue-600 shrink-0" />
-                          <span>📷 Ambil Foto / Upload Surat Jalan (Opsional)</span>
-                        </>
-                      )}
-                    </button>
+                        )}
+                        <span>📷 Foto Pakai Kamera HP</span>
+                      </button>
+
+                      {/* Opsi 2: Ambil dari Galeri / File */}
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          galleryInputRef1.current?.click();
+                        }}
+                        disabled={isCompressingPhoto}
+                        id="btn-upload-galeri-sj"
+                        className="flex items-center justify-center gap-2 p-3 rounded-xl border border-dashed border-slate-300 bg-white hover:bg-slate-50 text-slate-700 font-bold text-xs sm:text-sm cursor-pointer transition shadow-2xs active:scale-[0.98] disabled:opacity-70 disabled:cursor-not-allowed"
+                      >
+                        {isCompressingPhoto ? (
+                          <div className="w-4 h-4 border-2 border-slate-600 border-t-transparent rounded-full animate-spin shrink-0" />
+                        ) : (
+                          <ImageIcon className="w-4 h-4 text-slate-500 shrink-0" />
+                        )}
+                        <span>🖼️ Pilih dari Galeri / File</span>
+                      </button>
+                    </div>
+
+                    {isCompressingPhoto && (
+                      <div className="p-2 rounded-lg bg-blue-50 text-blue-800 text-xs font-semibold flex items-center justify-center gap-2">
+                        <div className="w-3.5 h-3.5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin shrink-0" />
+                        <span>Sedang mengompresi foto Surat Jalan...</span>
+                      </div>
+                    )}
+
                     <p className="text-[11px] text-slate-500 text-center">
-                      💡 Pilih Kamera langsung atau Media / Galeri. Foto otomatis dikompresi zero-crash (&le;900px JPEG kualitas 50%, ukuran ~60-120 KB) untuk mencegah crash memori HP.
+                      💡 Pilih <strong>Kamera HP</strong> untuk jepret fisik dokumen langsung, atau <strong>Galeri / File</strong> jika foto sudah tersimpan. Foto otomatis dikompresi (&le;900px, ~60-120 KB).
                     </p>
                   </div>
                 )}
 
-                {/* Hidden input file dengan accept="image/*" tanpa capture agar memunculkan pemilih (Kamera/File/Galeri) yang hemat memori */}
+                {/* Input khusus KAMERA HP LANGSUNG (capture="environment") */}
                 <input
                   type="file"
-                  ref={fileInputRef1}
+                  ref={cameraInputRef1}
+                  onClick={(e) => e.stopPropagation()}
+                  onChange={handleSuratJalanPhotoUpload}
+                  accept="image/*"
+                  capture="environment"
+                  className="hidden"
+                />
+
+                {/* Input khusus GALERI / FILE HP (tanpa capture) */}
+                <input
+                  type="file"
+                  ref={galleryInputRef1}
                   onClick={(e) => e.stopPropagation()}
                   onChange={handleSuratJalanPhotoUpload}
                   accept="image/*"
@@ -1775,21 +1827,48 @@ export const AdminView: React.FC = () => {
                   <p className="text-[11px] text-slate-400 italic">Belum ada foto yang diunggah.</p>
                 )}
 
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    fileInputRef2.current?.click();
-                  }}
-                  className="w-full flex items-center justify-center gap-2 p-2.5 rounded-lg border border-dashed border-slate-300 bg-slate-50 hover:bg-slate-100 text-slate-600 text-xs font-semibold cursor-pointer transition"
-                >
-                  <Upload className="w-4 h-4 text-emerald-600" />
-                  <span>Upload Foto Tambahan (JPG / PNG)</span>
-                </button>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      cameraInputRef2.current?.click();
+                    }}
+                    className="flex items-center justify-center gap-2 p-2.5 rounded-lg border-2 border-dashed border-emerald-400 bg-emerald-50/70 hover:bg-emerald-100 text-emerald-800 text-xs font-bold cursor-pointer transition active:scale-[0.98]"
+                  >
+                    <Camera className="w-4 h-4 text-emerald-600 shrink-0" />
+                    <span>📷 Kamera HP</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      galleryInputRef2.current?.click();
+                    }}
+                    className="flex items-center justify-center gap-2 p-2.5 rounded-lg border border-dashed border-slate-300 bg-slate-50 hover:bg-slate-100 text-slate-700 text-xs font-bold cursor-pointer transition active:scale-[0.98]"
+                  >
+                    <Upload className="w-4 h-4 text-slate-500 shrink-0" />
+                    <span>🖼️ Galeri / File</span>
+                  </button>
+                </div>
+
+                {/* Input khusus Kamera HP (capture="environment") */}
                 <input
                   type="file"
-                  ref={fileInputRef2}
+                  ref={cameraInputRef2}
+                  onClick={(e) => e.stopPropagation()}
+                  onChange={handleFileUpload2}
+                  accept="image/*"
+                  capture="environment"
+                  className="hidden"
+                />
+
+                {/* Input khusus Galeri / File (tanpa capture) */}
+                <input
+                  type="file"
+                  ref={galleryInputRef2}
                   onClick={(e) => e.stopPropagation()}
                   onChange={handleFileUpload2}
                   multiple

@@ -91,7 +91,9 @@ export const OperatorView: React.FC = () => {
   // Modal State for Pratinjau Dokumen Surat Jalan
   const [previewSuratJalanRecord, setPreviewSuratJalanRecord] = useState<UnloadingRecord | null>(null);
 
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  // Refs untuk Kamera HP langsung (capture="environment") vs Galeri/File HP
+  const cameraInputRef = useRef<HTMLInputElement>(null);
+  const galleryInputRef = useRef<HTMLInputElement>(null);
 
   // Listen for Escape key to close document preview modal
   useEffect(() => {
@@ -822,17 +824,39 @@ export const OperatorView: React.FC = () => {
                   </div>
                 )}
 
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  className="w-full flex items-center justify-center gap-2 p-3.5 rounded-xl border-2 border-dashed border-slate-300 bg-slate-50 hover:bg-slate-100 text-slate-700 text-xs font-bold cursor-pointer transition active:scale-[0.99]"
-                >
-                  <Camera className="w-4 h-4 text-blue-600" />
-                  <span>Ambil Foto Kamera / Unggah Dokumen Fisik</span>
-                </button>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => cameraInputRef.current?.click()}
+                    className="flex items-center justify-center gap-2 p-3 rounded-xl border-2 border-dashed border-blue-400 bg-blue-50 hover:bg-blue-100 text-blue-800 text-xs font-bold cursor-pointer transition active:scale-[0.98]"
+                  >
+                    <Camera className="w-4 h-4 text-blue-600 shrink-0" />
+                    <span>📷 Kamera HP</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => galleryInputRef.current?.click()}
+                    className="flex items-center justify-center gap-2 p-3 rounded-xl border border-dashed border-slate-300 bg-slate-50 hover:bg-slate-100 text-slate-700 text-xs font-bold cursor-pointer transition active:scale-[0.98]"
+                  >
+                    <Upload className="w-4 h-4 text-slate-500 shrink-0" />
+                    <span>🖼️ Galeri / File</span>
+                  </button>
+                </div>
+
+                {/* Input khusus Kamera HP (capture="environment") */}
                 <input
                   type="file"
-                  ref={fileInputRef}
+                  ref={cameraInputRef}
+                  onChange={handleFileUpload}
+                  accept="image/*"
+                  capture="environment"
+                  className="hidden"
+                />
+
+                {/* Input khusus Galeri / Media (tanpa capture) */}
+                <input
+                  type="file"
+                  ref={galleryInputRef}
                   onChange={handleFileUpload}
                   multiple
                   accept="image/*"
