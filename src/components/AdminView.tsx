@@ -37,56 +37,50 @@ import { formatDateTime, formatShortTime, calculateLeadTime, formatDuration, get
 import { GoogleDriveModal } from './GoogleDriveModal';
 
 /**
- * Helper kompresi gambar client-side ultra-efisien berbasis Canvas
- * Mencegah browser crash 'Unable to complete previous operation due to low memory' pada HP:
- * 1. Menggunakan URL.createObjectURL / createImageBitmap tanpa membaca string raksasa via FileReader
- * 2. Batasi resolusi maksimal gambar (max dimension / width & height) ke 800px
- * 3. Gambar ulang ke HTML5 Canvas dengan ukuran yang sudah di-downscale
- * 4. Ekspor canvas ke data URL JPEG dengan kualitas 0.55 (ukuran hasil base64 < 150 KB)
- * 5. Selalu lakukan URL.revokeObjectURL dan bersihkan canvas untuk membebaskan RAM HP seketika
+ * Kompresi gambar ultra-ringan menggunakan createImageBitmap / Canvas
+ * Mencegah crash browser "Unable to complete previous operation due to low memory" pada HP:
+ * 1. Tidak membaca full Base64 sebelum resize
+ * 2. Dapatkan dimensi asli dan decode langsung via createImageBitmap jika didukung
+ * 3. Segera panggil bitmap.close() untuk membebaskan RAM HP seketika
+ * 4. Ekspor ke JPEG kualitas 0.5 (ukuran file sangat ringan ~60-120 KB)
  */
-export const compressImageFile = async (file: File): Promise<string> => {
-  const maxDim = 800;
+export async function compressImageUltraLight(file: File): Promise<string> {
+  const MAX_DIM = 800;
 
-  // Prioritas 1: Gunakan createImageBitmap jika didukung browser (decode native background paling hemat RAM)
+  // 1. Dapatkan dimensi asli tanpa decode memori penuh jika browser support (decode native di background)
   if (typeof window !== 'undefined' && typeof window.createImageBitmap === 'function') {
     try {
       const bitmap = await window.createImageBitmap(file);
       let { width, height } = bitmap;
 
-      if (width > height && width > maxDim) {
-        height = Math.round((height * maxDim) / width);
-        width = maxDim;
-      } else if (height > maxDim) {
-        width = Math.round((width * maxDim) / height);
-        height = maxDim;
+      if (width > height && width > MAX_DIM) {
+        height = Math.round((height * MAX_DIM) / width);
+        width = MAX_DIM;
+      } else if (height > MAX_DIM) {
+        width = Math.round((width * MAX_DIM) / height);
+        height = MAX_DIM;
       }
 
       const canvas = document.createElement('canvas');
       canvas.width = width;
       canvas.height = height;
       const ctx = canvas.getContext('2d');
-      if (!ctx) {
-        bitmap.close();
-        throw new Error('Canvas 2D context tidak tersedia');
+      if (ctx) {
+        ctx.drawImage(bitmap, 0, 0, width, height);
       }
+      bitmap.close(); // Penting: Bebaskan RAM HP seketika
 
-      ctx.drawImage(bitmap, 0, 0, width, height);
-      bitmap.close(); // Bebaskan ImageBitmap dari GPU/RAM seketika
-
-      const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.55);
-
-      // Bersihkan canvas agar memori GPU/RAM segera dibebaskan
+      // Ekspor ke JPEG kualitas rendah/sedang (ukuran file jadi hanya ~60-120 KB)
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.5);
       canvas.width = 0;
       canvas.height = 0;
-
-      return compressedDataUrl;
+      return dataUrl;
     } catch (err) {
       console.warn('createImageBitmap gagal, beralih ke fallback createObjectURL:', err);
     }
   }
 
-  // Prioritas 2 / Fallback: URL.createObjectURL + HTMLImageElement (jauh lebih hemat daripada FileReader)
+  // Fallback hemat memori jika createImageBitmap gagal / tidak didukung
   return new Promise((resolve, reject) => {
     let objectUrl: string | null = null;
     try {
@@ -97,7 +91,6 @@ export const compressImageFile = async (file: File): Promise<string> => {
     }
 
     const img = new Image();
-
     const cleanup = () => {
       if (objectUrl) {
         URL.revokeObjectURL(objectUrl);
@@ -112,33 +105,27 @@ export const compressImageFile = async (file: File): Promise<string> => {
         let width = img.naturalWidth || img.width;
         let height = img.naturalHeight || img.height;
 
-        if (width > height && width > maxDim) {
-          height = Math.round((height * maxDim) / width);
-          width = maxDim;
-        } else if (height > maxDim) {
-          width = Math.round((width * maxDim) / height);
-          height = maxDim;
+        if (width > height && width > MAX_DIM) {
+          height = Math.round((height * MAX_DIM) / width);
+          width = MAX_DIM;
+        } else if (height > MAX_DIM) {
+          width = Math.round((width * MAX_DIM) / height);
+          height = MAX_DIM;
         }
 
         const canvas = document.createElement('canvas');
         canvas.width = width;
         canvas.height = height;
         const ctx = canvas.getContext('2d');
-        if (!ctx) {
-          cleanup();
-          reject(new Error('Canvas 2D context tidak tersedia'));
-          return;
+        if (ctx) {
+          ctx.drawImage(img, 0, 0, width, height);
         }
 
-        ctx.drawImage(img, 0, 0, width, height);
-        const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.55);
-
-        // Bersihkan canvas dari memory
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.5);
         canvas.width = 0;
         canvas.height = 0;
-
         cleanup();
-        resolve(compressedDataUrl);
+        resolve(dataUrl);
       } catch (e) {
         cleanup();
         reject(e);
@@ -147,12 +134,15 @@ export const compressImageFile = async (file: File): Promise<string> => {
 
     img.onerror = () => {
       cleanup();
-      reject(new Error('Gagal memuat gambar dari URL objek kamera'));
+      reject(new Error('Gagal memuat gambar dari URL objek'));
     };
 
     img.src = objectUrl;
   });
-};
+}
+
+// Alias untuk kompatibilitas
+export const compressImageFile = compressImageUltraLight;
 
 export const AdminView: React.FC = () => {
   const { 
@@ -329,9 +319,9 @@ export const AdminView: React.FC = () => {
     // Jalankan kompresi secara async tanpa memblokir thread UI utama
     setTimeout(async () => {
       try {
-        // Kompresi resolusi maksimal 800px dan JPEG 0.55 untuk menghemat RAM HP
-        const compressed = await compressImageFile(file);
-        // Hanya simpan string base64 hasil kompresi ringan (< 150 KB) ke state
+        // Kompresi ultra-ringan via createImageBitmap / Canvas (maks 800px, JPEG 0.5) untuk menghemat RAM HP
+        const compressed = await compressImageUltraLight(file);
+        // Hanya simpan string base64 hasil kompresi sangat ringan (~60-120 KB) ke state
         setSupplementalPhoto(compressed);
         setPhotoError(null);
       } catch (err) {
@@ -470,7 +460,7 @@ export const AdminView: React.FC = () => {
       if (e.target) e.target.value = '';
       for (const file of fileList) {
         try {
-          const compressed = await compressImageFile(file);
+          const compressed = await compressImageUltraLight(file);
           setUploadedPhotos(prev => [...prev, compressed]);
         } catch (err) {
           console.error('Gagal kompres foto barang:', err);
@@ -1432,7 +1422,7 @@ export const AdminView: React.FC = () => {
                     <span>Foto Dokumen Surat Jalan (Opsional)</span>
                   </label>
                   <span className="text-[10px] text-slate-500 font-semibold bg-white border border-slate-200 px-2 py-0.5 rounded-full">
-                    Opsional • Kompresi 800px JPEG (&lt;150KB)
+                    Opsional • Kompresi Ultra-Ringan JPEG (~60-120KB)
                   </span>
                 </div>
 
@@ -1443,7 +1433,7 @@ export const AdminView: React.FC = () => {
                     <div className="flex-1 space-y-0.5">
                       <p className="font-bold text-rose-900">{photoError}</p>
                       <p className="text-[11px] text-rose-700 leading-relaxed">
-                        Tip: Jika memori browser HP penuh, gunakan rasio standar kamera atau ambil foto ulang dari jarak fokus yang tepat.
+                        Tip: Jika memori browser HP penuh, gunakan pemilih foto galeri atau ambil foto dengan resolusi standar kamera.
                       </p>
                     </div>
                     <button
@@ -1482,7 +1472,7 @@ export const AdminView: React.FC = () => {
                           <span className="text-xs font-bold text-slate-800 truncate">Foto Surat Jalan Siap Disimpan</span>
                         </div>
                         <p className="text-[11px] text-slate-500">
-                          Format JPEG terkompresi otomatis (&le;800px, 55%) agar hemat RAM HP &amp; cepat terunggah ke Google Drive (&lt;150 KB).
+                          Format JPEG terkompresi otomatis (&le;800px, 50%) agar hemat RAM HP &amp; cepat terunggah (~60-120 KB).
                         </p>
                         <div className="flex items-center gap-2 pt-1">
                           <button
@@ -1548,19 +1538,18 @@ export const AdminView: React.FC = () => {
                       )}
                     </button>
                     <p className="text-[11px] text-slate-500 text-center">
-                      💡 Mengaktifkan kamera smartphone otomatis. Foto otomatis dikompresi ringan via Canvas (&le;800px JPEG kualitas 55%, hemat RAM HP &lt;150 KB).
+                      💡 Pilih Kamera, Galeri, atau File. Foto otomatis dikompresi ultra-ringan (&le;800px JPEG kualitas 50%, ukuran ~60-120 KB) untuk mencegah crash memori HP.
                     </p>
                   </div>
                 )}
 
-                {/* Hidden input file dengan accept="image/*" dan capture="environment" untuk kamera smartphone */}
+                {/* Hidden input file dengan accept="image/*" tanpa capture agar memunculkan pemilih (Kamera/File/Galeri) yang hemat memori */}
                 <input
                   type="file"
                   ref={fileInputRef1}
                   onClick={(e) => e.stopPropagation()}
                   onChange={handleSuratJalanPhotoUpload}
                   accept="image/*"
-                  capture="environment"
                   className="hidden"
                 />
               </div>
