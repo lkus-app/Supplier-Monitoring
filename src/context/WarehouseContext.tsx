@@ -74,7 +74,7 @@ interface WarehouseContextType {
     qcApprovedBy?: string;
   }) => Promise<void>;
 
-  releaseQueueToDock: (id: string) => Promise<void>;
+  releaseQueueToDock: (id: string, data?: { qcApprovalTime?: string; qcApprovedBy?: string }) => Promise<void>;
   
   startUnloading: (id: string, operatorName: string) => Promise<void>;
 
@@ -97,6 +97,7 @@ interface WarehouseContextType {
     adminName?: string;
   }) => Promise<void>;
   
+  cancelRecord: (id: string, reason: string, notes?: string, spvName?: string) => Promise<void>;
   deleteRecord: (id: string) => Promise<void>;
   clearAllData: () => Promise<void>;
   resetToDemoData: () => Promise<void>;
@@ -409,8 +410,8 @@ export const WarehouseProvider: React.FC<{ children: ReactNode }> = ({ children 
   const stats = useMemo<OperationalStats>(() => {
     const todayStr = getLocalDateString();
     
-    // Total kedatangan supplier yang tercatat hari ini
-    const todayRecords = records.filter(r => isRecordToday(r, todayStr));
+    // Total kedatangan supplier hari ini (eksklusi status CANCELLED)
+    const todayRecords = records.filter(r => isRecordToday(r, todayStr) && r.status !== 'CANCELLED');
     const totalToday = todayRecords.length;
 
     let waitingPO = 0;
@@ -419,6 +420,7 @@ export const WarehouseProvider: React.FC<{ children: ReactNode }> = ({ children 
     let activeUnloading = 0;
     let waitingAdminVerification = 0;
     let completedToday = 0;
+    let cancelledToday = 0;
     let onTimeCount = 0;
     let overdueCount = 0;
     let totalDurationSum = 0;
@@ -426,6 +428,13 @@ export const WarehouseProvider: React.FC<{ children: ReactNode }> = ({ children 
 
     records.forEach((r) => {
       const isFromToday = isRecordToday(r, todayStr);
+      
+      // Khusus armada berstatus CANCELLED: TIDAK DIHITUNG ke metrik operasional
+      if (r.status === 'CANCELLED') {
+        if (isFromToday) cancelledToday++;
+        return;
+      }
+
       const analysis = calculateLeadTime(r, currentTime);
       
       if (r.status === 'MENUNGGU_VERIFIKASI_PO') {
@@ -469,6 +478,7 @@ export const WarehouseProvider: React.FC<{ children: ReactNode }> = ({ children 
       activeUnloading,
       waitingAdminVerification,
       completedToday,
+      cancelledToday,
       onTimeCount,
       overdueCount,
       onTimeRate,
@@ -635,13 +645,18 @@ export const WarehouseProvider: React.FC<{ children: ReactNode }> = ({ children 
   };
 
   // Action: Release from Antri Mundur to Ready Dock (WAITING_DOCK_QUEUE -> PO_READY_DOCK_ASSIGNED)
-  const releaseQueueToDock = async (id: string) => {
+  const releaseQueueToDock = async (
+    id: string,
+    data?: { qcApprovalTime?: string; qcApprovedBy?: string }
+  ) => {
     let updatedItem: UnloadingRecord | null = null;
 
     const updated = records.map((item) => {
       if (item.id === id) {
         updatedItem = {
           ...item,
+          qcApprovalTime: data?.qcApprovalTime !== undefined ? data.qcApprovalTime : item.qcApprovalTime,
+          qcApprovedBy: data?.qcApprovedBy !== undefined ? data.qcApprovedBy : (item.qcApprovedBy || authUser?.name || 'Admin Gudang'),
           status: 'PO_READY_DOCK_ASSIGNED' as const,
         };
         return updatedItem;
@@ -901,6 +916,48 @@ export const WarehouseProvider: React.FC<{ children: ReactNode }> = ({ children 
     }
   };
 
+  // Action: Cancel Unloading / Batalkan Bongkaran (Khusus Supervisor / SPV)
+  const cancelRecord = async (id: string, reason: string, notes?: string, spvName?: string) => {
+    let updatedItem: UnloadingRecord | null = null;
+    const now = new Date();
+    const hours = String(now.getHours()).padStart(2, '0');
+    const minutes = String(now.getMinutes()).padStart(2, '0');
+    const cancelledAtStr = `${hours}:${minutes} WIB`;
+
+    const updated = records.map((item) => {
+      if (item.id === id) {
+        updatedItem = {
+          ...item,
+          status: 'CANCELLED',
+          cancelReason: reason.trim(),
+          cancelNotes: notes?.trim() || undefined,
+          cancelledBy: spvName?.trim() || authUser?.name || 'Supervisor WH CKL',
+          cancelledAt: cancelledAtStr,
+        };
+        return updatedItem;
+      }
+      return item;
+    });
+
+    setRecords(updated);
+    broadcastRecords(updated);
+    if (selectedRecord?.id === id && updatedItem) {
+      setSelectedRecord(updatedItem);
+    }
+
+    if (updatedItem) {
+      try {
+        setIsSyncing(true);
+        await saveRecordToGoogleSheets(updatedItem);
+      } catch (err) {
+        console.warn('GAS cancel save error:', err);
+      } finally {
+        setIsSyncing(false);
+        setLastSyncTime(new Date().toLocaleTimeString('id-ID'));
+      }
+    }
+  };
+
   // Action: Delete Single Record
   const deleteRecord = async (id: string) => {
     const updated = records.filter((r) => r.id !== id);
@@ -975,6 +1032,7 @@ export const WarehouseProvider: React.FC<{ children: ReactNode }> = ({ children 
         rejectZoneChange,
         operatorFinishUnloading,
         finishUnloading,
+        cancelRecord,
         deleteRecord,
         clearAllData,
         resetToDemoData,

@@ -154,6 +154,12 @@ export const AdminView: React.FC = () => {
   const [qcApprovalTime, setQcApprovalTime] = useState('');
   const [qcApprovedBy, setQcApprovedBy] = useState('');
 
+  // Modal State untuk Pelepasan Antre Mundur Khusus Armada Tanki (Input Wajib Jam ACC QC)
+  const [tankiReleaseModalRecord, setTankiReleaseModalRecord] = useState<UnloadingRecord | null>(null);
+  const [releaseQcTime, setReleaseQcTime] = useState('');
+  const [releaseQcBy, setReleaseQcBy] = useState('');
+  const [isSubmittingRelease, setIsSubmittingRelease] = useState(false);
+
   // Backup & Restore State Modal Form ke SessionStorage (Mencegah Kehilangan Input jika OS HP reload tab saat buka kamera)
   const STEP1_FORM_BACKUP_KEY = 'wh_admin_step1_form_backup';
 
@@ -240,7 +246,12 @@ export const AdminView: React.FC = () => {
   // Handle open verification modal (Step 1)
   const handleOpenVerify = (rec: UnloadingRecord) => {
     setVerifyingRecord(rec);
-    setDockInput(rec.assignedDock || 'Gudang BA1 depan');
+    // Jika armada jenis Tanki dan belum punya zona khusus, sarankan default ke Tanki Fructose
+    if (rec.vehicleType === 'Tanki' && (!rec.assignedDock || (rec.assignedDock !== 'Tanki Fructose' && rec.assignedDock !== 'Tanki Glucose'))) {
+      setDockInput('Tanki Fructose');
+    } else {
+      setDockInput(rec.assignedDock || 'Gudang BA1 depan');
+    }
     setAdminNotes1('');
     setSupplementalPhoto(rec.suratJalanPhoto || null);
     setPhotoError(null);
@@ -248,9 +259,16 @@ export const AdminView: React.FC = () => {
     setQcApprovedBy(rec.qcApprovedBy || '');
   };
 
-  // Helper untuk validasi syarat Jam ACC QC pada Tanki Fructose & Glucose
-  const isTankiZone = dockInput === 'Tanki Fructose' || dockInput === 'Tanki Glucose';
-  const isTankiValid = !isTankiZone || (qcApprovalTime.trim().length > 0);
+  // Helper untuk identifikasi armada jenis Tanki atau dialokasikan ke zona Tanki Fructose / Glucose
+  const isTankiFleet = (rec?: UnloadingRecord | null, targetDock?: string) => {
+    if (!rec) return false;
+    const vType = rec.vehicleType;
+    const dock = targetDock !== undefined ? targetDock : (rec.assignedDock || '');
+    return vType === 'Tanki' || dock === 'Tanki Fructose' || dock === 'Tanki Glucose';
+  };
+
+  // Status apakah armada yang sedang diverifikasi di Step 1 adalah Tanki
+  const isTankiStep1 = verifyingRecord ? isTankiFleet(verifyingRecord, dockInput) : false;
 
   const handleSetCurrentQcTime = () => {
     const now = new Date();
@@ -334,8 +352,9 @@ export const AdminView: React.FC = () => {
       return;
     }
 
-    if (isTankiZone && !qcApprovalTime.trim()) {
-      alert(`Wajib mengisi Jam ACC QC untuk verifikasi bongkaran ${dockInput}.`);
+    // Armada Tanki TIDAK DIIZINKAN langsung mundur (wajib antri mundur menunggu ACC QC)
+    if (isTankiStep1) {
+      alert('⚠️ Armada Tanki wajib antri mundur terlebih dahulu menunggu hasil ACC QC.');
       return;
     }
 
@@ -347,8 +366,8 @@ export const AdminView: React.FC = () => {
       adminNotes: adminNotes1,
       adminName: adminName1,
       suratJalanPhoto: supplementalPhoto ?? '',
-      qcApprovalTime: isTankiZone ? qcApprovalTime.trim() : undefined,
-      qcApprovedBy: isTankiZone ? (qcApprovedBy.trim() || undefined) : undefined,
+      qcApprovalTime: qcApprovalTime.trim() || undefined,
+      qcApprovedBy: qcApprovedBy.trim() || undefined,
     });
 
     setActionToast(`Armada ${queueNum} diverifikasi & diarahkan LANGSUNG MUNDUR ke ${targetDock}.`);
@@ -363,21 +382,18 @@ export const AdminView: React.FC = () => {
       return;
     }
 
-    if (isTankiZone && !qcApprovalTime.trim()) {
-      alert(`Wajib mengisi Jam ACC QC untuk verifikasi bongkaran ${dockInput}.`);
-      return;
-    }
-
     const queueNum = verifyingRecord.queueNumber;
     const targetDock = dockInput;
 
+    // Pada tahap 1 (verifikasi awal berkas), Admin BELUM diwajibkan input jam ACC QC untuk armada Tanki
+    // Jam ACC QC akan diwajibkan saat armada hendak dipanggil mundur di sub-menu Antri Mundur
     verifyPOAndHold(verifyingRecord.id, {
       assignedDock: targetDock,
       adminNotes: adminNotes1,
       adminName: adminName1,
       suratJalanPhoto: supplementalPhoto ?? '',
-      qcApprovalTime: isTankiZone ? qcApprovalTime.trim() : undefined,
-      qcApprovedBy: isTankiZone ? (qcApprovedBy.trim() || undefined) : undefined,
+      qcApprovalTime: qcApprovalTime.trim() || undefined,
+      qcApprovedBy: qcApprovedBy.trim() || undefined,
     });
 
     setActionToast(`Armada ${queueNum} diverifikasi & masuk ke antrean HOLD MUNDUR (${targetDock}).`);
@@ -387,9 +403,52 @@ export const AdminView: React.FC = () => {
 
   // Action from "Antri Mundur" tab: Panggil / Siap Mundur
   const handleCallToDock = (rec: UnloadingRecord) => {
-    releaseQueueToDock(rec.id);
-    setActionToast(`📢 Armada ${rec.queueNumber} dipanggil! Status beralih ke Siap Bongkar di ${rec.assignedDock || 'Dock'}.`);
-    setTimeout(() => setActionToast(null), 5000);
+    // Jika armada jenis Tanki (atau zona Tanki Fructose/Glucose), wajib konfirmasi input Jam ACC QC terlebih dahulu
+    if (isTankiFleet(rec)) {
+      setTankiReleaseModalRecord(rec);
+      setReleaseQcTime(rec.qcApprovalTime || '');
+      setReleaseQcBy(rec.qcApprovedBy || authUser?.name || '');
+    } else {
+      // Armada non-tanki: langsung rilis mundur ke dock
+      releaseQueueToDock(rec.id);
+      setActionToast(`📢 Armada ${rec.queueNumber} dipanggil! Status beralih ke Siap Bongkar di ${rec.assignedDock || 'Dock'}.`);
+      setTimeout(() => setActionToast(null), 5000);
+    }
+  };
+
+  const handleSetReleaseQcCurrentTime = () => {
+    const now = new Date();
+    const hours = String(now.getHours()).padStart(2, '0');
+    const minutes = String(now.getMinutes()).padStart(2, '0');
+    setReleaseQcTime(`${hours}:${minutes} WIB`);
+  };
+
+  // Konfirmasi Pelepasan Antre Mundur Armada Tanki dengan Jam ACC QC
+  const handleConfirmTankiRelease = async () => {
+    if (!tankiReleaseModalRecord) return;
+    if (!releaseQcTime.trim()) {
+      alert('Wajib mengisi Jam ACC QC sebelum mengizinkan armada Tanki mundur ke dock.');
+      return;
+    }
+
+    try {
+      setIsSubmittingRelease(true);
+      await releaseQueueToDock(tankiReleaseModalRecord.id, {
+        qcApprovalTime: releaseQcTime.trim(),
+        qcApprovedBy: releaseQcBy.trim() || undefined,
+      });
+
+      setActionToast(
+        `📢 Armada Tanki ${tankiReleaseModalRecord.queueNumber} (${tankiReleaseModalRecord.supplierName}) ACC QC: ${releaseQcTime.trim()} — diizinkan mundur ke ${tankiReleaseModalRecord.assignedDock || 'Dock'}!`
+      );
+      setTimeout(() => setActionToast(null), 5000);
+      setTankiReleaseModalRecord(null);
+    } catch (err) {
+      console.error('Gagal memproses pelepasan armada:', err);
+      alert('Gagal memproses pelepasan armada.');
+    } finally {
+      setIsSubmittingRelease(false);
+    }
   };
 
   // Handle open finalize / physical check modal (Step 2)
@@ -819,10 +878,23 @@ export const AdminView: React.FC = () => {
                       <button
                         onClick={() => handleCallToDock(rec)}
                         id={`btn-call-dock-${rec.id}`}
-                        className="w-full py-2.5 px-4 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-2 transition cursor-pointer shadow-sm hover:shadow"
+                        className={`w-full py-2.5 px-4 rounded-lg font-bold text-xs sm:text-sm flex items-center justify-center gap-2 transition cursor-pointer shadow-sm hover:shadow ${
+                          isTankiFleet(rec)
+                            ? 'bg-amber-600 hover:bg-amber-700 active:scale-[0.98] text-white'
+                            : 'bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] text-white'
+                        }`}
                       >
-                        <Megaphone className="w-4 h-4 animate-bounce" />
-                        <span>Panggil / Siap Mundur</span>
+                        {isTankiFleet(rec) ? (
+                          <>
+                            <FlaskConical className="w-4 h-4" />
+                            <span>ACC QC &amp; Panggil Mundur</span>
+                          </>
+                        ) : (
+                          <>
+                            <Megaphone className="w-4 h-4" />
+                            <span>Supplier Mundur ke Dock</span>
+                          </>
+                        )}
                       </button>
                     </div>
                   </div>
@@ -1146,13 +1218,15 @@ export const AdminView: React.FC = () => {
                             rec.status === 'PO_READY_DOCK_ASSIGNED' ? 'bg-blue-100 text-blue-700 border border-blue-200' :
                             rec.status === 'SEDANG_BONGKAR' ? 'bg-indigo-100 text-indigo-700 border border-indigo-200' :
                             rec.status === 'WAITING_ADMIN_VERIFICATION' || rec.status === 'MENUNGGU_VERIFIKASI_ADMIN' ? 'bg-amber-100 text-amber-900 border border-amber-400' :
+                            rec.status === 'CANCELLED' ? 'bg-rose-100 text-rose-700 border border-rose-200' :
                             'bg-emerald-100 text-emerald-700 border border-emerald-200'
                           }`}>
                             {rec.status === 'MENUNGGU_VERIFIKASI_PO' ? 'Menunggu PO' :
                              rec.status === 'WAITING_DOCK_QUEUE' ? 'Antri Mundur' :
                              rec.status === 'PO_READY_DOCK_ASSIGNED' ? 'Ready Dock' :
                              rec.status === 'SEDANG_BONGKAR' ? 'Bongkar' :
-                             rec.status === 'WAITING_ADMIN_VERIFICATION' || rec.status === 'MENUNGGU_VERIFIKASI_ADMIN' ? 'Perlu Cek' : 'Selesai'}
+                             rec.status === 'WAITING_ADMIN_VERIFICATION' || rec.status === 'MENUNGGU_VERIFIKASI_ADMIN' ? 'Perlu Cek' :
+                             rec.status === 'CANCELLED' ? 'Dibatalkan' : 'Selesai'}
                           </span>
                         </td>
                         <td className="px-4 py-3 text-right">
@@ -1316,71 +1390,57 @@ export const AdminView: React.FC = () => {
                 })()}
               </div>
 
-              {/* FITUR 1: Syarat Jam ACC QC untuk Tanki Fructose & Glucose */}
-              {isTankiZone && (
-                <div className="p-3.5 rounded-xl bg-amber-50/90 border-2 border-amber-400 space-y-2.5 animate-in fade-in duration-200">
-                  <div className="flex items-center justify-between">
-                    <label className="font-bold text-amber-950 flex items-center gap-1.5 text-xs">
-                      <FlaskConical className="w-4 h-4 text-amber-600 shrink-0" />
-                      <span>Syarat Khusus: Jam ACC QC ({dockInput})</span>
-                      <span className="text-red-600 font-black text-xs">*Wajib</span>
-                    </label>
-                    <span className="text-[10px] bg-amber-200 text-amber-900 font-bold px-2 py-0.5 rounded-full">
-                      Penerimaan Tangki
-                    </span>
+              {/* Peringatan Visual Khusus Armada Tanki pada Step 1 */}
+              {isTankiStep1 && (
+                <div className="p-4 rounded-xl bg-amber-50/90 border-2 border-amber-400 space-y-2.5 text-amber-950 shadow-2xs animate-in fade-in duration-200">
+                  <div className="flex items-center gap-2">
+                    <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0" />
+                    <h5 className="font-bold text-xs sm:text-sm text-amber-950">
+                      ⚠️ Armada Tanki wajib antri mundur terlebih dahulu menunggu hasil ACC QC
+                    </h5>
+                  </div>
+                  <p className="text-[11px] leading-relaxed text-amber-900">
+                    Sesuai aturan SOP penerimaan cairan/tangki, armada bertipe <strong>Tanki</strong> (atau zona {dockInput}) 
+                    wajib dialokasikan ke status <strong>&quot;Hold (Antri Mundur)&quot;</strong>. 
+                    Opsi langsung mundur ke dock dinonaktifkan hingga sampling QC dinyatakan lulus.
+                  </p>
+                  <div className="p-2.5 rounded-lg bg-amber-100/90 border border-amber-300/80 text-[11px] text-amber-950">
+                    ℹ️ <em>Pada tahap ini, Admin <strong>belum diwajibkan input jam ACC QC</strong>. Jam ACC QC wajib diisi saat armada hendak dipanggil mundur ke dock pada sub-menu &quot;Antri Mundur&quot;.</em>
                   </div>
 
-                  <p className="text-[11px] text-amber-900/90 leading-relaxed">
-                    Untuk penerimaan armada tangki (Fructose / Glucose), armada hanya boleh di-ACC/diverifikasi setelah hasil sampling QC dinyatakan lulus.
-                  </p>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-0.5">
-                    <div className="space-y-1">
-                      <label className="text-[11px] font-bold text-slate-700 block">
-                        Jam ACC QC <span className="text-red-500 font-bold">*Wajib</span>
-                      </label>
+                  {/* Input opsional jika Admin sudah memegang data ACC QC lebih awal */}
+                  <div className="pt-2 border-t border-amber-200/80 space-y-2">
+                    <label className="text-[11px] font-bold text-slate-700 flex items-center justify-between">
+                      <span>Jam ACC QC (Opsional pada tahap ini / dapat diisi saat rilis antre mundur)</span>
+                    </label>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                       <div className="flex items-center gap-1.5">
-                        <div className="relative flex-1">
-                          <input
-                            type="text"
-                            value={qcApprovalTime}
-                            onChange={(e) => setQcApprovalTime(e.target.value)}
-                            placeholder="Contoh: 14:30 WIB"
-                            className="w-full px-3 py-2 bg-white border border-amber-300 rounded-lg text-slate-900 font-mono text-xs focus:ring-2 focus:ring-amber-500 focus:outline-none"
-                          />
-                        </div>
+                        <input
+                          type="text"
+                          value={qcApprovalTime}
+                          onChange={(e) => setQcApprovalTime(e.target.value)}
+                          placeholder="Contoh: 14:30 WIB"
+                          className="w-full px-3 py-2 bg-white border border-amber-300 rounded-lg text-slate-900 font-mono text-xs focus:ring-2 focus:ring-amber-500 focus:outline-none"
+                        />
                         <button
                           type="button"
                           onClick={handleSetCurrentQcTime}
-                          className="px-2.5 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-[11px] font-bold shrink-0 transition cursor-pointer shadow-2xs flex items-center gap-1"
+                          className="px-2.5 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-[10px] font-bold shrink-0 transition cursor-pointer shadow-2xs flex items-center gap-1"
                           title="Isi dengan jam saat ini (WIB)"
                         >
-                          <Clock className="w-3.5 h-3.5" />
-                          <span>Isi Sekarang (WIB)</span>
+                          <Clock className="w-3 h-3" />
+                          <span>Sekarang</span>
                         </button>
                       </div>
-                    </div>
-
-                    <div className="space-y-1">
-                      <label className="text-[11px] font-bold text-slate-700 block">
-                        Petugas / Analis QC (Opsional)
-                      </label>
                       <input
                         type="text"
                         value={qcApprovedBy}
                         onChange={(e) => setQcApprovedBy(e.target.value)}
-                        placeholder="Contoh: Analis QC / Ibu Siti"
+                        placeholder="Petugas QC (Opsional)"
                         className="w-full px-3 py-2 bg-white border border-amber-300 rounded-lg text-slate-900 text-xs focus:ring-2 focus:ring-amber-500 focus:outline-none"
                       />
                     </div>
                   </div>
-
-                  {!qcApprovalTime.trim() && (
-                    <div className="flex items-center gap-1.5 text-[11px] text-red-600 font-semibold pt-0.5">
-                      <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-                      <span>Wajib mengisi Jam ACC QC untuk mengaktifkan tombol verifikasi di bawah.</span>
-                    </div>
-                  )}
                 </div>
               )}
 
@@ -1592,17 +1652,7 @@ export const AdminView: React.FC = () => {
                 />
               </div>
 
-              {/* Warning when Tanki zone without QC ACC */}
-              {!isTankiValid && (
-                <div className="p-2.5 rounded-xl bg-rose-50 border border-rose-300 text-rose-800 text-xs flex items-center gap-2">
-                  <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
-                  <span>
-                    <strong>Tombol Verifikasi Dinonaktifkan:</strong> Untuk zona <strong>{dockInput}</strong>, mohon isi <strong>Jam ACC QC</strong> terlebih dahulu.
-                  </span>
-                </div>
-              )}
-
-              {/* Two Action Buttons */}
+              {/* Action Buttons */}
               <div className="pt-3 border-t border-slate-100 flex flex-col sm:flex-row items-stretch sm:items-center justify-end gap-2.5">
                 <button
                   type="button"
@@ -1612,39 +1662,37 @@ export const AdminView: React.FC = () => {
                   Batal
                 </button>
 
-                {/* Tombol B: Hold / Antri Mundur */}
+                {/* Tombol B: Hold / Antri Mundur (Satu-satunya opsi untuk Tanki, atau opsi hold untuk armada non-tanki) */}
                 <button
                   type="button"
                   onClick={handleVerifyAndHold}
-                  disabled={!isTankiValid || isCompressingPhoto}
+                  disabled={isCompressingPhoto}
                   id="btn-verify-hold-queue"
-                  className={`px-4 py-2.5 rounded-xl font-bold flex items-center justify-center gap-2 shadow-sm text-xs sm:text-sm order-2 transition ${
-                    !isTankiValid || isCompressingPhoto
-                      ? 'bg-slate-300 text-slate-500 cursor-not-allowed border border-slate-300'
-                      : 'bg-amber-500 hover:bg-amber-600 text-white cursor-pointer'
-                  }`}
-                  title={!isTankiValid ? "Jam ACC QC wajib diisi terlebih dahulu untuk zona tangki" : isCompressingPhoto ? "Menunggu proses kompresi foto..." : "Verifikasi dokumen dan simpan di antrean hold mundur"}
+                  className={`px-5 py-2.5 rounded-xl font-bold flex items-center justify-center gap-2 shadow-sm text-xs sm:text-sm order-2 transition cursor-pointer ${
+                    isTankiStep1
+                      ? 'bg-amber-600 hover:bg-amber-700 active:scale-[0.98] text-white ring-2 ring-amber-300'
+                      : 'bg-amber-500 hover:bg-amber-600 active:scale-[0.98] text-white'
+                  } disabled:opacity-50 disabled:cursor-not-allowed`}
+                  title={isCompressingPhoto ? "Menunggu proses kompresi foto..." : "Verifikasi berkas dan tempatkan di antrean Antri Mundur"}
                 >
                   <PauseCircle className="w-4 h-4" />
                   <span>Verifikasi &amp; Hold (Antri Mundur)</span>
                 </button>
 
-                {/* Tombol A: Langsung Mundur */}
-                <button
-                  type="button"
-                  onClick={handleVerifyAndDirect}
-                  disabled={!isTankiValid || isCompressingPhoto}
-                  id="btn-verify-direct-dock"
-                  className={`px-5 py-2.5 rounded-xl font-bold flex items-center justify-center gap-2 shadow-sm text-xs sm:text-sm order-1 sm:order-3 transition ${
-                    !isTankiValid || isCompressingPhoto
-                      ? 'bg-slate-300 text-slate-500 cursor-not-allowed border border-slate-300'
-                      : 'bg-blue-600 hover:bg-blue-700 text-white cursor-pointer'
-                  }`}
-                  title={!isTankiValid ? "Jam ACC QC wajib diisi terlebih dahulu untuk zona tangki" : isCompressingPhoto ? "Menunggu proses kompresi foto..." : "Verifikasi dokumen dan langsung izinkan armada mundur ke dock"}
-                >
-                  <Check className="w-4 h-4" />
-                  <span>Verifikasi &amp; Langsung Mundur</span>
-                </button>
+                {/* Tombol A: Langsung Mundur (DISEMBUNYIKAN UNTUK ARMADA TANKI) */}
+                {!isTankiStep1 && (
+                  <button
+                    type="button"
+                    onClick={handleVerifyAndDirect}
+                    disabled={isCompressingPhoto}
+                    id="btn-verify-direct-dock"
+                    className="px-5 py-2.5 rounded-xl font-bold flex items-center justify-center gap-2 shadow-sm text-xs sm:text-sm order-1 sm:order-3 transition bg-blue-600 hover:bg-blue-700 active:scale-[0.98] text-white cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                    title={isCompressingPhoto ? "Menunggu proses kompresi foto..." : "Verifikasi dokumen dan langsung izinkan armada mundur ke dock"}
+                  >
+                    <Check className="w-4 h-4" />
+                    <span>Verifikasi &amp; Langsung Mundur</span>
+                  </button>
+                )}
               </div>
             </div>
           </div>
@@ -1928,6 +1976,149 @@ export const AdminView: React.FC = () => {
               alt="Preview" 
               className="max-h-[85vh] max-w-full rounded-xl object-contain shadow-2xl" 
             />
+          </div>
+        </div>
+      )}
+
+      {/* MODAL PELEPASAN ANTRI MUNDUR KHUSUS ARMADA TANKI (WAJIB INPUT JAM ACC QC) */}
+      {tankiReleaseModalRecord && (
+        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white border border-slate-200 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-5 my-6 animate-in fade-in zoom-in duration-200">
+            {/* Header */}
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2.5">
+                <span className="p-2 rounded-xl bg-amber-100 text-amber-800 border border-amber-300">
+                  <FlaskConical className="w-5 h-5" />
+                </span>
+                <div>
+                  <h3 className="font-bold text-slate-900 text-base sm:text-lg">Konfirmasi ACC QC &amp; Panggil Mundur</h3>
+                  <p className="text-xs text-slate-500 font-mono">
+                    Armada Tanki • {tankiReleaseModalRecord.queueNumber}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setTankiReleaseModalRecord(null)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Identitas Armada */}
+            <div className="bg-amber-50/70 border border-amber-200 rounded-xl p-3.5 space-y-2 text-xs">
+              <div className="flex justify-between items-center">
+                <span className="text-slate-600 font-medium">Supplier &amp; Nopol:</span>
+                <span className="font-bold text-slate-900">{tankiReleaseModalRecord.supplierName} ({tankiReleaseModalRecord.licensePlate})</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-slate-600 font-medium">Driver:</span>
+                <span className="font-mono text-slate-800">{tankiReleaseModalRecord.driverName} {tankiReleaseModalRecord.driverPhone ? `• ${tankiReleaseModalRecord.driverPhone}` : ''}</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-slate-600 font-medium">Jenis Armada / Target:</span>
+                <span className="font-bold text-blue-700 bg-blue-100/70 px-2 py-0.5 rounded border border-blue-200">
+                  {tankiReleaseModalRecord.vehicleType} &rarr; {tankiReleaseModalRecord.assignedDock || 'Dock'}
+                </span>
+              </div>
+            </div>
+
+            {/* Alert SOP */}
+            <div className="p-3 rounded-xl bg-amber-50/90 border border-amber-300 text-amber-900 text-xs flex items-start gap-2.5">
+              <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+              <p className="text-[11px] leading-relaxed">
+                Sesuai SOP penerimaan bahan cair/tangki, <strong>armada hanya boleh dipanggil mundur ke loading dock setelah hasil analisa sampling QC dinyatakan LULUS (ACC)</strong>.
+              </p>
+            </div>
+
+            {/* Input Form Jam ACC QC */}
+            <div className="space-y-3.5">
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-slate-800 flex items-center justify-between">
+                  <span>Jam ACC QC <span className="text-red-500 font-bold">*Wajib</span></span>
+                  {releaseQcTime.trim() && (
+                    <span className="text-[10px] text-emerald-600 font-bold bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                      ✓ Terisi
+                    </span>
+                  )}
+                </label>
+                <div className="flex items-center gap-2">
+                  <div className="relative flex-1">
+                    <input
+                      type="text"
+                      value={releaseQcTime}
+                      onChange={(e) => setReleaseQcTime(e.target.value)}
+                      placeholder="Contoh: 14:30 WIB"
+                      className="w-full px-3.5 py-2.5 bg-white border border-amber-300 rounded-xl text-slate-900 font-mono text-sm focus:ring-2 focus:ring-amber-500 focus:outline-none"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleSetReleaseQcCurrentTime}
+                    className="px-3 py-2.5 bg-amber-600 hover:bg-amber-700 active:scale-[0.98] text-white rounded-xl text-xs font-bold shrink-0 transition cursor-pointer shadow-2xs flex items-center gap-1.5"
+                    title="Isi dengan jam saat ini (WIB)"
+                  >
+                    <Clock className="w-3.5 h-3.5" />
+                    <span>Isi Jam Sekarang</span>
+                  </button>
+                </div>
+                {!releaseQcTime.trim() && (
+                  <p className="text-[11px] text-red-600 font-medium">
+                    ⚠️ Jam ACC QC wajib diisi untuk mengaktifkan tombol konfirmasi mundur.
+                  </p>
+                )}
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-slate-700 block">
+                  Nama Petugas / Analis QC (Opsional)
+                </label>
+                <input
+                  type="text"
+                  value={releaseQcBy}
+                  onChange={(e) => setReleaseQcBy(e.target.value)}
+                  placeholder="Contoh: Ibu Siti / Lab QC Fructose"
+                  className="w-full px-3.5 py-2.5 bg-white border border-slate-300 rounded-xl text-slate-900 text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                />
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="pt-3 border-t border-slate-100 flex items-center justify-end gap-2.5">
+              <button
+                type="button"
+                onClick={() => setTankiReleaseModalRecord(null)}
+                disabled={isSubmittingRelease}
+                className="px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold cursor-pointer text-xs sm:text-sm transition disabled:opacity-50"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmTankiRelease}
+                disabled={!releaseQcTime.trim() || isSubmittingRelease}
+                id="btn-confirm-tanki-release"
+                className={`px-5 py-2.5 rounded-xl font-bold flex items-center justify-center gap-2 shadow-sm text-xs sm:text-sm transition ${
+                  !releaseQcTime.trim() || isSubmittingRelease
+                    ? 'bg-slate-300 text-slate-500 cursor-not-allowed border border-slate-300'
+                    : 'bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] text-white cursor-pointer'
+                }`}
+                title={!releaseQcTime.trim() ? "Isi Jam ACC QC terlebih dahulu" : "Konfirmasi armada mundur ke dock"}
+              >
+                {isSubmittingRelease ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin shrink-0" />
+                    <span>Memproses...</span>
+                  </>
+                ) : (
+                  <>
+                    <Megaphone className="w-4 h-4" />
+                    <span>Konfirmasi Supplier Mundur</span>
+                  </>
+                )}
+              </button>
+            </div>
           </div>
         </div>
       )}

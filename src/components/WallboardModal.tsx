@@ -136,7 +136,14 @@ export const WallboardModal: React.FC = () => {
           <div className="mt-3 text-4xl sm:text-5xl font-black font-mono text-white">
             {stats.totalToday} <span className="text-base text-slate-500 font-sans font-normal">Armada</span>
           </div>
-          <p className="text-xs text-slate-400 mt-2">Masuk Gate-In hari ini</p>
+          <div className="flex items-center gap-2 mt-2 flex-wrap">
+            <span className="text-xs text-slate-400">Masuk Gate-In hari ini</span>
+            {stats.cancelledToday > 0 && (
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/30">
+                🚫 {stats.cancelledToday} Dibatalkan
+              </span>
+            )}
+          </div>
         </div>
 
         <div className="bg-slate-900/90 border border-amber-500/30 rounded-3xl p-5 shadow-2xl">

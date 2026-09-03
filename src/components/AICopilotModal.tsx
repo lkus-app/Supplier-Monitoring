@@ -119,7 +119,7 @@ export const AICopilotModal: React.FC = () => {
               <span>Rekomendasi Alokasi Manpower Armada Berat</span>
             </div>
             <p className="text-slate-600 leading-relaxed">
-              Berdasarkan data historis, armada <strong>Wingbox 20T</strong> dan <strong>Tronton</strong> memiliki variansi durasi tertinggi saat dikerjakan oleh &lt;4 operator. Pastikan minimal 4 personil + 1 unit forklift aktif di Dock 01 &amp; Dock 04.
+              Berdasarkan data historis, armada <strong>Wingbox 20 ton</strong>, <strong>Kontainer</strong>, dan <strong>Fuso</strong> memiliki variansi durasi tertinggi saat dikerjakan oleh &lt;4 operator. Pastikan minimal 4 personil + 1 unit forklift aktif di Dock 01 &amp; Dock 04.
             </p>
           </div>
 

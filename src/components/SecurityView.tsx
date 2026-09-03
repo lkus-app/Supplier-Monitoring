@@ -12,7 +12,7 @@ import {
   ArrowRight
 } from 'lucide-react';
 import { useWarehouse } from '../context/WarehouseContext';
-import { VehicleType, VEHICLE_LEAD_TIMES, UnloadingRecord } from '../types';
+import { VehicleType, VEHICLE_LEAD_TIMES, STANDARD_VEHICLE_TYPES, UnloadingRecord } from '../types';
 import { formatShortTime } from '../utils/timeUtils';
 
 export const SecurityView: React.FC = () => {
@@ -22,7 +22,7 @@ export const SecurityView: React.FC = () => {
   const [supplierName, setSupplierName] = useState('');
   const [driverName, setDriverName] = useState('');
   const [licensePlate, setLicensePlate] = useState('');
-  const [vehicleType, setVehicleType] = useState<VehicleType>('CDD');
+  const [vehicleType, setVehicleType] = useState<VehicleType>('Engkel');
   const [driverPhone, setDriverPhone] = useState('');
   
   // Last submitted record for quick on-screen feedback
@@ -259,7 +259,7 @@ export const SecurityView: React.FC = () => {
             <label htmlFor="select-vehicle-type" className="text-xs sm:text-sm font-bold text-slate-800 flex items-center justify-between">
               <span>Jenis Kendaraan &amp; Standar Lead Time <span className="text-red-500">*</span></span>
               <span className="text-xs text-blue-600 font-mono font-bold">
-                SOP Bongkar: {VEHICLE_LEAD_TIMES[vehicleType].minutes} Menit
+                SOP Bongkar: {VEHICLE_LEAD_TIMES[vehicleType]?.minutes || 60} Menit
               </span>
             </label>
             <select
@@ -268,11 +268,14 @@ export const SecurityView: React.FC = () => {
               onChange={(e) => setVehicleType(e.target.value as VehicleType)}
               className="w-full px-3.5 py-3 bg-white border border-slate-300 rounded-xl text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm font-medium cursor-pointer"
             >
-              <option value="Wingbox 20T">Wingbox 20T — (SOP: 120 Menit / 20 Ton)</option>
-              <option value="CDE">CDE (Colt Diesel Engkel / 4 Roda) — (SOP: 60 Menit)</option>
-              <option value="CDD">CDD (Colt Diesel Double / 6 Roda) — (SOP: 120 Menit)</option>
-              <option value="Tronton">Tronton (Truk Heavy Duty / 10 Roda) — (SOP: 120 Menit)</option>
-              <option value="Pick Up">Pick Up / Blind Van — (SOP: 30 Menit)</option>
+              {STANDARD_VEHICLE_TYPES.map((type) => {
+                const info = VEHICLE_LEAD_TIMES[type];
+                return (
+                  <option key={type} value={type}>
+                    {type} — (SOP: {info.minutes} Menit / {info.description})
+                  </option>
+                );
+              })}
             </select>
           </div>
 

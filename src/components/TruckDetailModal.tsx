@@ -17,7 +17,8 @@ import {
   ClipboardCheck,
   PackageCheck,
   HardDrive,
-  FolderOpen
+  FolderOpen,
+  Ban
 } from 'lucide-react';
 import { useWarehouse } from '../context/WarehouseContext';
 import { formatDateTime, formatShortTime, calculateLeadTime, formatDuration } from '../utils/timeUtils';
@@ -50,9 +51,11 @@ export const TruckDetailModal: React.FC = () => {
                   selectedRecord.status === 'PO_READY_DOCK_ASSIGNED' ? 'bg-blue-50 text-blue-700 border-blue-200' :
                   selectedRecord.status === 'SEDANG_BONGKAR' ? 'bg-purple-50 text-purple-700 border-purple-200' :
                   selectedRecord.status === 'WAITING_ADMIN_VERIFICATION' || selectedRecord.status === 'MENUNGGU_VERIFIKASI_ADMIN' ? 'bg-amber-50 text-amber-900 border-amber-300' :
+                  selectedRecord.status === 'CANCELLED' ? 'bg-rose-100 text-rose-700 border-rose-300 font-black' :
                   'bg-emerald-50 text-emerald-700 border-emerald-200'
                 }`}>
-                  {selectedRecord.status === 'WAITING_DOCK_QUEUE' ? 'ANTRI MUNDUR / HOLD' : selectedRecord.status}
+                  {selectedRecord.status === 'WAITING_DOCK_QUEUE' ? 'ANTRI MUNDUR / HOLD' : 
+                   selectedRecord.status === 'CANCELLED' ? 'DIBATALKAN / CANCELLED' : selectedRecord.status}
                 </span>
               </div>
               <h3 className="font-bold text-slate-900 text-lg mt-0.5">{selectedRecord.supplierName}</h3>
@@ -66,6 +69,42 @@ export const TruckDetailModal: React.FC = () => {
             <X className="w-5 h-5" />
           </button>
         </div>
+
+        {/* Cancellation Notice Banner (If Cancelled) */}
+        {selectedRecord.status === 'CANCELLED' && (
+          <div className="p-4 rounded-xl bg-rose-50 border border-rose-200 text-rose-900 space-y-2.5 animate-in fade-in">
+            <div className="flex items-center gap-2">
+              <span className="p-1.5 rounded-lg bg-rose-100 text-rose-700">
+                <Ban className="w-5 h-5" />
+              </span>
+              <div>
+                <h4 className="font-bold text-sm text-rose-900">Bongkaran Dibatalkan oleh Supervisor</h4>
+                <p className="text-xs text-rose-700">Armada ini telah dibatalkan dari proses bongkaran dan tidak masuk ke perhitungan lead time.</p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs bg-white/90 p-3 rounded-lg border border-rose-200">
+              <div>
+                <span className="text-slate-500 font-semibold block text-[11px]">Alasan Pembatalan:</span>
+                <span className="font-black text-rose-700 text-sm mt-0.5 block">{selectedRecord.cancelReason || 'Dibatalkan tanpa alasan tertulis'}</span>
+              </div>
+              <div>
+                <span className="text-slate-500 font-semibold block text-[11px]">Waktu Pembatalan:</span>
+                <span className="font-mono text-slate-800 font-bold mt-0.5 block">{selectedRecord.cancelledAt || '-'}</span>
+              </div>
+              {selectedRecord.cancelNotes && (
+                <div className="col-span-full border-t border-rose-100 pt-2 mt-1">
+                  <span className="text-slate-500 font-semibold block text-[11px]">Catatan Detail Tambahan:</span>
+                  <span className="text-slate-800 italic mt-0.5 block">&quot;{selectedRecord.cancelNotes}&quot;</span>
+                </div>
+              )}
+              <div className="col-span-full border-t border-rose-100 pt-2 mt-1 flex items-center justify-between">
+                <span className="text-slate-500 font-semibold text-[11px]">Supervisor Penanggung Jawab:</span>
+                <span className="font-bold text-slate-900">👤 {selectedRecord.cancelledBy || 'Supervisor WH CKL'}</span>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Lead Time & SLA Performance Summary Card */}
         <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 grid grid-cols-2 sm:grid-cols-4 gap-3 text-center">

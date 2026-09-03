@@ -1,4 +1,23 @@
-export type VehicleType = 'Wingbox 20T' | 'CDE' | 'CDD' | 'Tronton' | 'Pick Up';
+export type StandardVehicleType = 
+  | 'Engkel' 
+  | 'Wingbox 20 ton' 
+  | 'Kontainer' 
+  | 'Double Engkel' 
+  | 'Fuso' 
+  | 'Tanki';
+
+export type LegacyVehicleType = 'Wingbox 20T' | 'CDE' | 'CDD' | 'Tronton' | 'Pick Up';
+
+export type VehicleType = StandardVehicleType | LegacyVehicleType;
+
+export const STANDARD_VEHICLE_TYPES: StandardVehicleType[] = [
+  'Engkel',
+  'Wingbox 20 ton',
+  'Kontainer',
+  'Double Engkel',
+  'Fuso',
+  'Tanki',
+];
 
 export const WAREHOUSE_ZONES = [
   'Gudang BA1 depan',
@@ -15,35 +34,73 @@ export const WAREHOUSE_ZONES = [
 export type WarehouseZone = typeof WAREHOUSE_ZONES[number];
 
 export const VEHICLE_LEAD_TIMES: Record<VehicleType, { minutes: number; label: string; description: string; capacity: string }> = {
-  'Wingbox 20T': {
+  'Engkel': {
+    minutes: 60,
+    label: 'Engkel [60m]',
+    description: 'Colt Diesel Engkel (4 Roda)',
+    capacity: '2-3 Ton / 10-14 CBM',
+  },
+  'Wingbox 20 ton': {
+    minutes: 180,
+    label: 'Wingbox 20 ton [180m]',
+    description: 'Truk Wingbox Kapasitas Besar 20 Ton',
+    capacity: '20 Ton / 45-55 CBM',
+  },
+  'Kontainer': {
+    minutes: 180,
+    label: 'Kontainer [180m]',
+    description: 'Truk Kontainer / Peti Kemas (20ft / 40ft)',
+    capacity: '20-30 Ton / Kontainer',
+  },
+  'Double Engkel': {
     minutes: 120,
-    label: 'Wingbox 20T [120m]',
+    label: 'Double Engkel [120m]',
+    description: 'Colt Diesel Double / CDD (6 Roda)',
+    capacity: '4-7 Ton / 20-25 CBM',
+  },
+  'Fuso': {
+    minutes: 180,
+    label: 'Fuso [180m]',
+    description: 'Truk Fuso / Tronton (Heavy Duty)',
+    capacity: '10-15 Ton / 30-40 CBM',
+  },
+  'Tanki': {
+    minutes: 300,
+    label: 'Tanki [300m]',
+    description: 'Truk Tanki Cairan (Fructose, Glucose, Alkohol, dll)',
+    capacity: '15.000 - 32.000 Liter',
+  },
+
+  // Legacy mappings for backwards compatibility with historical data:
+  'Wingbox 20T': {
+    minutes: 180,
+    label: 'Wingbox 20 ton [180m]',
     description: 'Truk Wingbox Kapasitas Besar 20 Ton',
     capacity: '20 Ton / 45-55 CBM',
   },
   'CDE': {
     minutes: 60,
-    label: 'CDE [60m]',
+    label: 'Engkel [60m]',
     description: 'Colt Diesel Engkel (4 Roda)',
     capacity: '2-3 Ton / 10-14 CBM',
   },
   'CDD': {
     minutes: 120,
-    label: 'CDD [120m]',
+    label: 'Double Engkel [120m]',
     description: 'Colt Diesel Double (6 Roda)',
     capacity: '4-7 Ton / 20-25 CBM',
   },
   'Tronton': {
-    minutes: 120,
-    label: 'Tronton [120m]',
-    description: 'Truk Tronton Heavy Duty (10 Roda)',
-    capacity: '15-20 Ton / 35-45 CBM',
+    minutes: 180,
+    label: 'Fuso [180m]',
+    description: 'Truk Tronton / Fuso',
+    capacity: '15-20 Ton',
   },
   'Pick Up': {
-    minutes: 30,
-    label: 'Pick Up [30m]',
-    description: 'Mobil Bak / Blind Van / Pick Up Kecil',
-    capacity: '1-1.5 Ton / 4-6 CBM',
+    minutes: 60,
+    label: 'Engkel / Pick Up [60m]',
+    description: 'Mobil Bak Kecil / Pick Up',
+    capacity: '1-2 Ton',
   },
 };
 
@@ -55,7 +112,10 @@ export type QueueStatus =
   | 'WAITING_ADMIN_VERIFICATION' // Operator finished (T4 Operator), waiting Admin physical check
   | 'MENUNGGU_VERIFIKASI_ADMIN'  // Alias
   | 'SELESAI_BONGKAR'        // T4 final recorded, finalized
-  | 'FINISHED';              // Alias
+  | 'FINISHED'               // Alias
+  | 'CANCELLED';             // Dibatalkan oleh Supervisor (SPV)
+
+export type UnloadingStatus = QueueStatus;
 
 export type GoodsCondition = 'Sesuai' | 'Selisih' | 'Rusak';
 
@@ -111,6 +171,12 @@ export interface UnloadingRecord {
   
   // Workflow status
   status: QueueStatus;
+
+  // Pembatalan Bongkaran (Khusus Supervisor / SPV)
+  cancelReason?: string;
+  cancelNotes?: string;
+  cancelledBy?: string;
+  cancelledAt?: string;
 
   // Google Drive & Cloud Storage Integration Fields
   googleDriveSyncStatus?: 'idle' | 'syncing' | 'synced' | 'error';
@@ -232,6 +298,7 @@ export interface OperationalStats {
   activeUnloading: number;
   waitingAdminVerification: number;
   completedToday: number;
+  cancelledToday: number;
   onTimeCount: number;
   overdueCount: number;
   onTimeRate: number;
