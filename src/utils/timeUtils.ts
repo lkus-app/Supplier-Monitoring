@@ -118,11 +118,43 @@ export interface LeadTimeAnalysis {
   actualUnloadingMinutes: number; // T4 - T3 (or Now - T3 if ongoing)
   waitingPoMinutes: number; // T2 - T1
   waitingStartMinutes: number; // T3 - T2
-  totalTurnaroundMinutes: number; // (T4 || Now) - T1
+  totalTurnaroundMinutes: number; // Durasi = Timestamp T4 (Verifikasi Final Admin) - Timestamp T1 (Gate In)
+  totalLeadTimeMinutes: number; // Alias totalTurnaroundMinutes
   varianceMinutes: number; // actual - standard (negative = faster, positive = delayed)
   isOverdue: boolean;
   progressPercent: number; // actual / standard * 100
   statusText: 'On-Time' | 'Overdue' | 'In Progress' | 'Pending';
+}
+
+/**
+ * Hitung total durasi / turnaround time bongkaran berdasarkan selisih:
+ * Durasi = Timestamp T4 (Verifikasi Final Admin) - Timestamp T1 (Gate In)
+ */
+export function calculateTotalLeadTimeMinutes(record: UnloadingRecord, currentTime = Date.now()): number {
+  if (!record.t1GateIn) return 0;
+  const start = new Date(record.t1GateIn).getTime();
+  if (isNaN(start)) return 0;
+  
+  // Jika sudah ada T4 Verifikasi Final Admin, gunakan T4 tersebut
+  if (record.t4UnloadingFinish) {
+    const end = new Date(record.t4UnloadingFinish).getTime();
+    if (!isNaN(end)) return Math.max(0, Math.round((end - start) / (1000 * 60)));
+  }
+  
+  // Jika berstatus selesai tapi hanya ada t4Operator
+  const isFinished = record.status === 'COMPLETED' || record.status === 'SELESAI_BONGKAR' || record.status === 'FINISHED';
+  if (isFinished && record.t4Operator) {
+    const end = new Date(record.t4Operator).getTime();
+    if (!isNaN(end)) return Math.max(0, Math.round((end - start) / (1000 * 60)));
+  }
+
+  // Jika dibatalkan, jangan hitung durasi berjalan
+  if (record.status === 'CANCELLED') {
+    return 0;
+  }
+
+  // Masih berjalan
+  return Math.max(0, Math.round((currentTime - start) / (1000 * 60)));
 }
 
 export function calculateLeadTime(record: UnloadingRecord, currentTime = Date.now()): LeadTimeAnalysis {
@@ -132,40 +164,46 @@ export function calculateLeadTime(record: UnloadingRecord, currentTime = Date.no
   let isOngoing = false;
 
   if (record.t3UnloadingStart && record.t4UnloadingFinish) {
-    actualUnloadingMinutes = Math.round(
+    actualUnloadingMinutes = Math.max(0, Math.round(
       (new Date(record.t4UnloadingFinish).getTime() - new Date(record.t3UnloadingStart).getTime()) / (1000 * 60)
-    );
+    ));
   } else if (record.t3UnloadingStart && record.t4Operator) {
-    actualUnloadingMinutes = Math.round(
+    actualUnloadingMinutes = Math.max(0, Math.round(
       (new Date(record.t4Operator).getTime() - new Date(record.t3UnloadingStart).getTime()) / (1000 * 60)
-    );
+    ));
   } else if (record.t3UnloadingStart) {
     isOngoing = true;
-    actualUnloadingMinutes = Math.round(
+    actualUnloadingMinutes = Math.max(0, Math.round(
       (currentTime - new Date(record.t3UnloadingStart).getTime()) / (1000 * 60)
-    );
+    ));
   }
 
   const waitingPoMinutes = record.t1GateIn && record.t2PoReady 
-    ? Math.round((new Date(record.t2PoReady).getTime() - new Date(record.t1GateIn).getTime()) / (1000 * 60))
-    : (record.t1GateIn ? Math.round((currentTime - new Date(record.t1GateIn).getTime()) / (1000 * 60)) : 0);
+    ? Math.max(0, Math.round((new Date(record.t2PoReady).getTime() - new Date(record.t1GateIn).getTime()) / (1000 * 60)))
+    : (record.t1GateIn ? Math.max(0, Math.round((currentTime - new Date(record.t1GateIn).getTime()) / (1000 * 60))) : 0);
 
   const waitingStartMinutes = record.t2PoReady && record.t3UnloadingStart
-    ? Math.round((new Date(record.t3UnloadingStart).getTime() - new Date(record.t2PoReady).getTime()) / (1000 * 60))
+    ? Math.max(0, Math.round((new Date(record.t3UnloadingStart).getTime() - new Date(record.t2PoReady).getTime()) / (1000 * 60)))
     : 0;
 
-  const totalTurnaroundMinutes = record.t1GateIn
-    ? Math.round(((record.t4UnloadingFinish || record.t4Operator ? new Date(record.t4UnloadingFinish || record.t4Operator!).getTime() : currentTime) - new Date(record.t1GateIn).getTime()) / (1000 * 60))
-    : 0;
+  // Durasi Total Lead Time: Timestamp T4 (Verifikasi Final Admin) - Timestamp T1 (Gate In)
+  const totalTurnaroundMinutes = calculateTotalLeadTimeMinutes(record, currentTime);
 
   const varianceMinutes = actualUnloadingMinutes - standardMinutes;
   const isOverdue = record.t3UnloadingStart ? actualUnloadingMinutes > standardMinutes : false;
   const progressPercent = Math.min(200, Math.round((actualUnloadingMinutes / standardMinutes) * 100));
 
   let statusText: 'On-Time' | 'Overdue' | 'In Progress' | 'Pending' = 'Pending';
-  if (record.status === 'SELESAI_BONGKAR' || record.status === 'FINISHED') {
+  if (record.status === 'COMPLETED' || record.status === 'SELESAI_BONGKAR' || record.status === 'FINISHED') {
     statusText = isOverdue ? 'Overdue' : 'On-Time';
-  } else if (record.status === 'SEDANG_BONGKAR' || record.status === 'WAITING_ADMIN_VERIFICATION' || record.status === 'MENUNGGU_VERIFIKASI_ADMIN') {
+  } else if (
+    record.status === 'SEDANG_BONGKAR' || 
+    record.status === 'UNLOADING_IN_PROGRESS' ||
+    record.status === 'WAITING_ADMIN_VERIFICATION' || 
+    record.status === 'MENUNGGU_VERIFIKASI_ADMIN' ||
+    record.status === 'UNLOADING_FINISHED_OPERATOR' ||
+    record.status === 'WAITING_FINAL_ADMIN_VERIFICATION'
+  ) {
     statusText = isOverdue ? 'Overdue' : 'In Progress';
   }
 
@@ -175,6 +213,7 @@ export function calculateLeadTime(record: UnloadingRecord, currentTime = Date.no
     waitingPoMinutes,
     waitingStartMinutes,
     totalTurnaroundMinutes,
+    totalLeadTimeMinutes: totalTurnaroundMinutes,
     varianceMinutes,
     isOverdue,
     progressPercent,

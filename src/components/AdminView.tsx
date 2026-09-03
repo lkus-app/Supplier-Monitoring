@@ -220,7 +220,7 @@ export const AdminView: React.FC = () => {
 
   // Step 2 Finalization Modal / Drawer State
   const [finalizingRecord, setFinalizingRecord] = useState<UnloadingRecord | null>(null);
-  const [operatorCount, setOperatorCount] = useState<number>(3);
+  const [operatorCount, setOperatorCount] = useState<number | ''>('');
   const [goodsCondition, setGoodsCondition] = useState<GoodsCondition>('Sesuai');
   const [adminFinalNotes, setAdminFinalNotes] = useState('');
   const [adminName2, setAdminName2] = useState(authUser?.name || 'Admin WH CKL');
@@ -240,11 +240,18 @@ export const AdminView: React.FC = () => {
   const waitingPOList = records.filter(r => r.status === 'MENUNGGU_VERIFIKASI_PO');
   const waitingDockQueueList = records.filter(r => r.status === 'WAITING_DOCK_QUEUE');
   const waitingVerificationList = records.filter(
-    r => r.status === 'WAITING_ADMIN_VERIFICATION' || r.status === 'MENUNGGU_VERIFIKASI_ADMIN'
+    r => r.status === 'WAITING_ADMIN_VERIFICATION' || 
+         r.status === 'MENUNGGU_VERIFIKASI_ADMIN' ||
+         r.status === 'UNLOADING_FINISHED_OPERATOR' ||
+         r.status === 'WAITING_FINAL_ADMIN_VERIFICATION'
   );
-  const activeUnloadingList = records.filter(r => r.status === 'SEDANG_BONGKAR');
+  const activeUnloadingList = records.filter(r => r.status === 'SEDANG_BONGKAR' || r.status === 'UNLOADING_IN_PROGRESS');
   const readyDockList = records.filter(r => r.status === 'PO_READY_DOCK_ASSIGNED');
-  const finishedList = records.filter(r => r.status === 'SELESAI_BONGKAR' || r.status === 'FINISHED');
+  const finishedList = records.filter(
+    r => r.status === 'SELESAI_BONGKAR' || 
+         r.status === 'FINISHED' || 
+         r.status === 'COMPLETED'
+  );
 
   // Handle open verification modal (Step 1)
   const handleOpenVerify = (rec: UnloadingRecord) => {
@@ -457,7 +464,8 @@ export const AdminView: React.FC = () => {
   // Handle open finalize / physical check modal (Step 2)
   const handleOpenFinalize = (rec: UnloadingRecord) => {
     setFinalizingRecord(rec);
-    setOperatorCount(rec.operatorCount || 3);
+    // Inisialisasi awal input dibuat kosong / null (bukan default angka 1 atau lainnya)
+    setOperatorCount(rec.operatorCount && rec.operatorCount > 0 ? rec.operatorCount : '');
     setGoodsCondition(rec.goodsCondition || 'Sesuai');
     setAdminFinalNotes(rec.adminFinalNotes || '');
     setUploadedPhotos(rec.goodsPhotos || rec.operatorPhotos || []);
@@ -469,8 +477,8 @@ export const AdminView: React.FC = () => {
     e.stopPropagation();
     if (isSubmittingFinalize) return;
     if (!finalizingRecord) return;
-    if (!operatorCount || operatorCount <= 0) {
-      alert('Mohon masukkan Jumlah Operator Bongkar (minimal 1).');
+    if (!operatorCount || Number(operatorCount) <= 0) {
+      alert('Mohon masukkan Jumlah Operator Bongkar (Wajib diisi dan minimal 1 orang).');
       return;
     }
 
@@ -1806,13 +1814,27 @@ export const AdminView: React.FC = () => {
                     id="input-operator-count"
                     type="number"
                     min="1"
-                    max="20"
+                    max="50"
+                    placeholder="Masukkan jumlah operator bongkar (Wajib)"
                     required
                     value={operatorCount}
-                    onChange={(e) => setOperatorCount(parseInt(e.target.value) || 1)}
-                    className="w-full pl-9 pr-3 py-2.5 bg-white border border-slate-300 rounded-lg text-slate-900 font-mono focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (val === '') {
+                        setOperatorCount('');
+                      } else {
+                        const parsed = parseInt(val, 10);
+                        setOperatorCount(isNaN(parsed) ? '' : parsed);
+                      }
+                    }}
+                    className="w-full pl-9 pr-3 py-2.5 bg-white border border-slate-300 rounded-lg text-slate-900 font-mono focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm placeholder:text-slate-400 placeholder:font-sans"
                   />
                 </div>
+                {(!operatorCount || Number(operatorCount) <= 0) && (
+                  <p className="text-[11px] text-amber-600 font-medium">
+                    ⚠️ Jumlah operator bongkar wajib diisi (minimal 1) untuk melanjutkan verifikasi final.
+                  </p>
+                )}
               </div>
 
               {/* Status Fisik Barang (Radio: Sesuai / Selisih / Rusak) */}
@@ -1988,7 +2010,12 @@ export const AdminView: React.FC = () => {
                 <button
                   type="submit"
                   id="btn-confirm-finalize"
-                  disabled={isSubmittingFinalize || isCompressingPhoto2}
+                  disabled={
+                    isSubmittingFinalize || 
+                    isCompressingPhoto2 || 
+                    !operatorCount || 
+                    Number(operatorCount) <= 0
+                  }
                   className="px-5 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold flex items-center gap-2 cursor-pointer shadow-md text-xs sm:text-sm disabled:opacity-50 disabled:cursor-not-allowed transition"
                 >
                   {isSubmittingFinalize ? (

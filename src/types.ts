@@ -109,11 +109,14 @@ export type QueueStatus =
   | 'WAITING_DOCK_QUEUE'     // Antri Mundur / Hold area bongkar
   | 'PO_READY_DOCK_ASSIGNED'  // T2 recorded, dock assigned, ready for Operator
   | 'SEDANG_BONGKAR'         // T3 recorded, active unloading
+  | 'UNLOADING_IN_PROGRESS'  // Alias active unloading
   | 'WAITING_ADMIN_VERIFICATION' // Operator finished (T4 Operator), waiting Admin physical check
   | 'MENUNGGU_VERIFIKASI_ADMIN'  // Alias
-  | 'SELESAI_BONGKAR'        // T4 final recorded, finalized
+  | 'UNLOADING_FINISHED_OPERATOR' // Operator selesai bongkar fisik
+  | 'WAITING_FINAL_ADMIN_VERIFICATION' // Menunggu Verifikasi Final Admin Step 2
+  | 'SELESAI_BONGKAR'        // Selesai
   | 'FINISHED'               // Alias
-  | 'COMPLETED'              // Alias Selesai
+  | 'COMPLETED'              // Selesai Bongkar Resmi (setelah Admin Verifikasi Final Step 2)
   | 'CANCELLED';             // Dibatalkan oleh Supervisor (SPV)
 
 export type UnloadingStatus = QueueStatus;
@@ -267,6 +270,7 @@ export const DEMO_ACCOUNTS = {
   admin: {
     username: 'adminwhckl',
     password: '2026',
+    pin: '654321', // Quick PIN Admin Default
     name: 'Admin WH CKL',
   },
   operator: {
@@ -278,6 +282,7 @@ export const DEMO_ACCOUNTS = {
   spv: {
     username: 'spvwhckl',
     password: 'whckl2026',
+    pin: '654321',
     name: 'Supervisor WH CKL',
   },
 };

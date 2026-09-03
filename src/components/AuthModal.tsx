@@ -33,7 +33,7 @@ export const AuthModal: React.FC = () => {
   useEffect(() => {
     if (authModalRole) {
       setSelectedRole(authModalRole);
-      if (authModalRole === 'operator') {
+      if (authModalRole === 'operator' || authModalRole === 'admin') {
         setLoginMethod('pin');
       } else {
         setLoginMethod('password');
@@ -53,7 +53,7 @@ export const AuthModal: React.FC = () => {
     setUsername('');
     setPassword('');
     setPin('');
-    if (role === 'operator') {
+    if (role === 'operator' || role === 'admin') {
       setLoginMethod('pin');
     } else {
       setLoginMethod('password');
@@ -67,15 +67,15 @@ export const AuthModal: React.FC = () => {
 
     setTimeout(() => {
       let result;
-      if (selectedRole === 'operator' && loginMethod === 'pin') {
-        result = loginWithCredentials('operator', 'operator', pin);
+      if ((selectedRole === 'operator' || selectedRole === 'admin') && loginMethod === 'pin') {
+        result = loginWithCredentials(selectedRole, selectedRole, pin);
       } else {
         result = loginWithCredentials(selectedRole, username, password);
       }
 
       setIsSubmitting(false);
       if (!result.success) {
-        setErrorMessage(result.message || 'Username atau password yang dimasukkan tidak sesuai.');
+        setErrorMessage(result.message || 'Username, password, atau PIN yang dimasukkan tidak sesuai.');
       }
     }, 200);
   };
@@ -195,8 +195,8 @@ export const AuthModal: React.FC = () => {
 
         {/* Login Form */}
         <form onSubmit={handleSubmit} className="space-y-4">
-          {/* Operator Choice: PIN vs Password */}
-          {selectedRole === 'operator' && (
+          {/* Admin & Operator Choice: PIN vs Password */}
+          {(selectedRole === 'operator' || selectedRole === 'admin') && (
             <div className="flex items-center justify-between pb-1 border-b border-slate-100 text-xs">
               <span className="text-slate-600 font-semibold">Metode Masuk:</span>
               <div className="flex gap-2">
@@ -205,18 +205,18 @@ export const AuthModal: React.FC = () => {
                   onClick={() => { setLoginMethod('pin'); setErrorMessage(''); }}
                   className={`px-2.5 py-1 rounded-md text-xs font-bold cursor-pointer transition ${
                     loginMethod === 'pin' 
-                      ? 'bg-purple-600 text-white' 
+                      ? selectedRole === 'admin' ? 'bg-orange-600 text-white' : 'bg-purple-600 text-white' 
                       : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                   }`}
                 >
-                  Kode PIN
+                  PIN Cepat
                 </button>
                 <button
                   type="button"
                   onClick={() => { setLoginMethod('password'); setErrorMessage(''); }}
                   className={`px-2.5 py-1 rounded-md text-xs font-bold cursor-pointer transition ${
                     loginMethod === 'password' 
-                      ? 'bg-purple-600 text-white' 
+                      ? selectedRole === 'admin' ? 'bg-orange-600 text-white' : 'bg-purple-600 text-white' 
                       : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                   }`}
                 >
@@ -226,10 +226,10 @@ export const AuthModal: React.FC = () => {
             </div>
           )}
 
-          {selectedRole === 'operator' && loginMethod === 'pin' ? (
+          {(selectedRole === 'operator' || selectedRole === 'admin') && loginMethod === 'pin' ? (
             <div>
               <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                PIN Akses Operator Loading Dock
+                {selectedRole === 'admin' ? 'PIN Cepat Admin Gudang' : 'PIN Akses Operator Loading Dock'}
               </label>
               <div className="relative">
                 <KeyRound className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -239,8 +239,10 @@ export const AuthModal: React.FC = () => {
                   maxLength={6}
                   value={pin}
                   onChange={(e) => setPin(e.target.value)}
-                  placeholder="Masukkan 4-6 digit PIN operator"
-                  className="w-full pl-9 pr-4 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-slate-900 text-sm font-mono tracking-widest focus:ring-2 focus:ring-purple-500 focus:outline-none focus:bg-white"
+                  placeholder="Masukkan 6 digit PIN"
+                  className={`w-full pl-9 pr-4 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-slate-900 text-sm font-mono tracking-widest focus:outline-none focus:bg-white ${
+                    selectedRole === 'admin' ? 'focus:ring-2 focus:ring-orange-500' : 'focus:ring-2 focus:ring-purple-500'
+                  }`}
                   required
                   autoFocus
                 />

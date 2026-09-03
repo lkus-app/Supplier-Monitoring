@@ -364,7 +364,10 @@ export const WarehouseProvider: React.FC<{ children: ReactNode }> = ({ children 
 
     if (role === 'admin') {
       const demo = DEMO_ACCOUNTS.admin;
-      if (cleanId === demo.username && cleanSecret === demo.password) {
+      const isPinMatch = cleanSecret === demo.pin || cleanId === demo.pin;
+      const isCredsMatch = cleanId === demo.username && cleanSecret === demo.password;
+
+      if (isPinMatch || isCredsMatch) {
         const user: AuthUser = {
           role: 'admin',
           username: demo.username,
@@ -374,10 +377,17 @@ export const WarehouseProvider: React.FC<{ children: ReactNode }> = ({ children 
         setAuthUser(user);
         setActiveRole('admin');
         setActiveView('admin');
+        try {
+          localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(user));
+          localStorage.setItem(ROLE_STORAGE_KEY, 'admin');
+          localStorage.setItem(VIEW_STORAGE_KEY, 'admin');
+        } catch (e) {
+          console.warn('Failed to save admin session immediately to localStorage:', e);
+        }
         closeAuthModal();
         return { success: true };
       }
-      return { success: false, message: 'Username atau Password Admin salah!' };
+      return { success: false, message: 'PIN atau Kredensial Admin salah!' };
     }
 
     if (role === 'operator') {
@@ -392,6 +402,11 @@ export const WarehouseProvider: React.FC<{ children: ReactNode }> = ({ children 
         setAuthUser(user);
         setActiveRole('operator');
         setActiveView('operator');
+        try {
+          localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(user));
+          localStorage.setItem(ROLE_STORAGE_KEY, 'operator');
+          localStorage.setItem(VIEW_STORAGE_KEY, 'operator');
+        } catch (e) {}
         closeAuthModal();
         return { success: true };
       }
@@ -400,7 +415,7 @@ export const WarehouseProvider: React.FC<{ children: ReactNode }> = ({ children 
 
     if (role === 'spv') {
       const demo = DEMO_ACCOUNTS.spv;
-      if (cleanId === demo.username && cleanSecret === demo.password) {
+      if (cleanSecret === demo.pin || cleanId === demo.pin || (cleanId === demo.username && cleanSecret === demo.password)) {
         const user: AuthUser = {
           role: 'spv',
           username: demo.username,
@@ -410,6 +425,11 @@ export const WarehouseProvider: React.FC<{ children: ReactNode }> = ({ children 
         setAuthUser(user);
         setActiveRole('spv');
         setActiveView('spv');
+        try {
+          localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(user));
+          localStorage.setItem(ROLE_STORAGE_KEY, 'spv');
+          localStorage.setItem(VIEW_STORAGE_KEY, 'spv');
+        } catch (e) {}
         closeAuthModal();
         return { success: true };
       }
@@ -494,10 +514,15 @@ export const WarehouseProvider: React.FC<{ children: ReactNode }> = ({ children 
       } else if (r.status === 'SEDANG_BONGKAR') {
         activeUnloading++;
         if (analysis.isOverdue) overdueCount++;
-      } else if (r.status === 'WAITING_ADMIN_VERIFICATION' || r.status === 'MENUNGGU_VERIFIKASI_ADMIN') {
+      } else if (
+        r.status === 'WAITING_ADMIN_VERIFICATION' || 
+        r.status === 'MENUNGGU_VERIFIKASI_ADMIN' ||
+        r.status === 'UNLOADING_FINISHED_OPERATOR' ||
+        r.status === 'WAITING_FINAL_ADMIN_VERIFICATION'
+      ) {
         waitingAdminVerification++;
         if (analysis.isOverdue) overdueCount++;
-      } else if (r.status === 'SELESAI_BONGKAR' || r.status === 'FINISHED') {
+      } else if (r.status === 'COMPLETED' || r.status === 'SELESAI_BONGKAR' || r.status === 'FINISHED') {
         // Hanya hitung yang selesai hari ini, tidak diakumulasi dari hari-hari sebelumnya
         if (isFromToday) {
           completedToday++;
@@ -897,7 +922,7 @@ export const WarehouseProvider: React.FC<{ children: ReactNode }> = ({ children 
           operatorNotes: data.operatorNotes?.trim() || item.operatorNotes,
           operatorPhotos: data.photos && data.photos.length > 0 ? data.photos : item.operatorPhotos,
           goodsPhotos: combinedPhotos.length > 0 ? combinedPhotos : item.goodsPhotos,
-          status: 'WAITING_ADMIN_VERIFICATION',
+          status: 'UNLOADING_FINISHED_OPERATOR',
         };
         return updatedItem;
       }
@@ -935,8 +960,8 @@ export const WarehouseProvider: React.FC<{ children: ReactNode }> = ({ children 
     const nowIso = data.t4UnloadingFinish || new Date().toISOString();
     let updatedItem: UnloadingRecord | null = null;
 
-    // Normalisasi status ke SELESAI_BONGKAR
-    const finalStatus: QueueStatus = 'SELESAI_BONGKAR';
+    // Normalisasi status resmi: COMPLETED (Selesai Bongkar hanya setelah Verifikasi Final Admin)
+    const finalStatus: QueueStatus = 'COMPLETED';
 
     const updated = records.map((item) => {
       if (item.id === id) {
@@ -983,7 +1008,19 @@ export const WarehouseProvider: React.FC<{ children: ReactNode }> = ({ children 
   const completeAdminFinalVerification = finishUnloading;
 
   // Action: Cancel Unloading / Batalkan Bongkaran (Khusus Supervisor / SPV)
+  // Aturan Revisi 1: Hanya bisa dilakukan jika status armada adalah WAITING_DOCK_QUEUE
   const cancelRecord = async (id: string, reason: string, notes?: string, spvName?: string) => {
+    const target = records.find(r => r.id === id);
+    if (!target) {
+      alert('Data armada tidak ditemukan.');
+      return;
+    }
+
+    if (target.status !== 'WAITING_DOCK_QUEUE') {
+      alert('Pembatalan bongkaran oleh SPV HANYA BISA dilakukan jika status armada adalah "Antri Mundur" (WAITING_DOCK_QUEUE). Armada yang sudah dialokasikan ke dock, sedang bongkar, atau tahap setelahnya tidak dapat dibatalkan.');
+      return;
+    }
+
     let updatedItem: UnloadingRecord | null = null;
     const now = new Date();
     const hours = String(now.getHours()).padStart(2, '0');

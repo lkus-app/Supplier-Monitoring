@@ -744,6 +744,7 @@ export const SupervisorView: React.FC = () => {
                     <th className="px-4 py-3">Kendaraan</th>
                     <th className="px-4 py-3">Driver</th>
                     <th className="px-4 py-3">T1 Masuk</th>
+                    <th className="px-4 py-3">T2: Verifikasi PO</th>
                     <th className="px-4 py-3">T3 Mulai</th>
                     <th className="px-4 py-3">T4 Selesai</th>
                     <th className="px-4 py-3">Durasi</th>
@@ -766,7 +767,7 @@ export const SupervisorView: React.FC = () => {
                 <tbody className="divide-y divide-slate-100 font-medium">
                   {filteredRecords.length === 0 ? (
                     <tr>
-                      <td colSpan={11} className="px-4 py-8 text-center text-slate-400">
+                      <td colSpan={12} className="px-4 py-8 text-center text-slate-400">
                         Tidak ada data antrean yang sesuai dengan kriteria pencarian.
                       </td>
                     </tr>
@@ -779,7 +780,7 @@ export const SupervisorView: React.FC = () => {
                         <tr 
                           key={rec.id} 
                           className={`hover:bg-blue-50/30 transition-colors ${
-                            isOverdue && rec.status === 'SEDANG_BONGKAR' ? 'bg-red-50/40' : ''
+                            isOverdue && (rec.status === 'SEDANG_BONGKAR' || rec.status === 'UNLOADING_IN_PROGRESS') ? 'bg-red-50/40' : ''
                           }`}
                         >
                           {/* No Antrean */}
@@ -825,6 +826,24 @@ export const SupervisorView: React.FC = () => {
                             {formatShortTime(rec.t1GateIn)}
                           </td>
 
+                          {/* T2: Verifikasi PO */}
+                          <td className="px-4 py-3.5">
+                            {rec.t2PoReady ? (
+                              <div>
+                                <div className="font-mono text-slate-800 font-semibold text-xs">
+                                  {formatShortTime(rec.t2PoReady)} WIB
+                                </div>
+                                {(rec.adminNameStep1 || rec.adminName) && (
+                                  <div className="text-[10px] text-slate-500 font-sans truncate max-w-[120px]" title={rec.adminNameStep1 || rec.adminName}>
+                                    👤 {rec.adminNameStep1 || rec.adminName}
+                                  </div>
+                                )}
+                              </div>
+                            ) : (
+                              <span className="text-slate-400 text-xs italic">-</span>
+                            )}
+                          </td>
+
                           {/* Jam Mulai (T3) */}
                           <td className="px-4 py-3.5 font-mono text-slate-600">
                             {formatShortTime(rec.t3UnloadingStart)}
@@ -832,21 +851,34 @@ export const SupervisorView: React.FC = () => {
 
                           {/* Jam Selesai (T4) */}
                           <td className="px-4 py-3.5 font-mono text-slate-600">
-                            {formatShortTime(rec.t4UnloadingFinish)}
+                            {formatShortTime(rec.t4UnloadingFinish || rec.t4Operator)}
                           </td>
 
-                          {/* Total Durasi (T4-T3 or Live) */}
+                          {/* Total Durasi (T4-T3 or Live) & Total Lead Time (T4-T1) */}
                           <td className="px-4 py-3.5">
                             {rec.t3UnloadingStart ? (
                               <div>
                                 <span className={`font-mono font-bold ${isOverdue ? 'text-red-600' : 'text-slate-800'}`}>
                                   {formatDuration(analysis.actualUnloadingMinutes)}
                                 </span>
-                                {rec.status === 'SEDANG_BONGKAR' && (
+                                {rec.status === 'SEDANG_BONGKAR' || rec.status === 'UNLOADING_IN_PROGRESS' ? (
                                   <span className="text-[10px] text-blue-600 block font-sans">
-                                    (Live)
+                                    (Bongkar)
+                                  </span>
+                                ) : (
+                                  <span className="text-[10px] text-slate-400 block font-sans">
+                                    (Fisik)
                                   </span>
                                 )}
+                                {rec.t1GateIn && (
+                                  <span className="text-[10px] text-blue-700 block font-mono font-semibold" title="Total Lead Time: T4 (Verifikasi Final) - T1 (Gate In)">
+                                    T1-T4: {formatDuration(analysis.totalTurnaroundMinutes)}
+                                  </span>
+                                )}
+                              </div>
+                            ) : rec.t1GateIn ? (
+                              <div className="text-xs text-slate-500 font-mono">
+                                Lead: {formatDuration(analysis.totalTurnaroundMinutes)}
                               </div>
                             ) : (
                               <span className="text-slate-400">-</span>
@@ -879,8 +911,13 @@ export const SupervisorView: React.FC = () => {
                                 ? 'bg-amber-100 text-amber-800 border border-amber-300'
                                 : rec.status === 'PO_READY_DOCK_ASSIGNED'
                                 ? 'bg-blue-100 text-blue-700 border border-blue-200'
-                                : rec.status === 'SEDANG_BONGKAR'
+                                : rec.status === 'SEDANG_BONGKAR' || rec.status === 'UNLOADING_IN_PROGRESS'
                                 ? 'bg-indigo-100 text-indigo-700 border border-indigo-200'
+                                : rec.status === 'WAITING_ADMIN_VERIFICATION' || 
+                                  rec.status === 'MENUNGGU_VERIFIKASI_ADMIN' ||
+                                  rec.status === 'UNLOADING_FINISHED_OPERATOR' ||
+                                  rec.status === 'WAITING_FINAL_ADMIN_VERIFICATION'
+                                ? 'bg-purple-100 text-purple-800 border border-purple-300'
                                 : rec.status === 'CANCELLED'
                                 ? 'bg-rose-100 text-rose-700 border border-rose-200'
                                 : 'bg-emerald-100 text-emerald-700 border border-emerald-200'
@@ -888,7 +925,11 @@ export const SupervisorView: React.FC = () => {
                               {rec.status === 'MENUNGGU_VERIFIKASI_PO' ? 'Menunggu PO' :
                                rec.status === 'WAITING_DOCK_QUEUE' ? 'Antri Mundur' :
                                rec.status === 'PO_READY_DOCK_ASSIGNED' ? 'Ready Dock' :
-                               rec.status === 'SEDANG_BONGKAR' ? 'Bongkar' :
+                               rec.status === 'SEDANG_BONGKAR' || rec.status === 'UNLOADING_IN_PROGRESS' ? 'Bongkar' :
+                               rec.status === 'WAITING_ADMIN_VERIFICATION' || 
+                               rec.status === 'MENUNGGU_VERIFIKASI_ADMIN' ||
+                               rec.status === 'UNLOADING_FINISHED_OPERATOR' ||
+                               rec.status === 'WAITING_FINAL_ADMIN_VERIFICATION' ? 'Verif Final' :
                                rec.status === 'CANCELLED' ? 'Dibatalkan' : 'Selesai'}
                             </span>
                           </td>
@@ -904,7 +945,8 @@ export const SupervisorView: React.FC = () => {
                                 <Eye className="w-3.5 h-3.5 text-blue-600" />
                                 <span>Audit</span>
                               </button>
-                              {rec.status !== 'SELESAI_BONGKAR' && rec.status !== 'FINISHED' && rec.status !== 'CANCELLED' && (
+                              {/* Aturan Revisi 1: Cancel HANYA BISA jika status WAITING_DOCK_QUEUE */}
+                              {rec.status === 'WAITING_DOCK_QUEUE' && (
                                 <button
                                   type="button"
                                   onClick={() => {
@@ -914,7 +956,7 @@ export const SupervisorView: React.FC = () => {
                                     setCancelNotes('');
                                   }}
                                   className="px-2.5 py-1 rounded bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-700 hover:text-rose-800 text-xs font-bold inline-flex items-center gap-1 transition cursor-pointer"
-                                  title="Batalkan Bongkaran Armada Ini"
+                                  title="Batalkan Bongkaran Armada Ini (Khusus status Antri Mundur)"
                                 >
                                   <Ban className="w-3.5 h-3.5 text-rose-600" />
                                   <span className="hidden sm:inline">Batalkan</span>
@@ -1257,8 +1299,24 @@ export const SupervisorView: React.FC = () => {
                   <span className="text-slate-500 text-[11px] block">Jenis &amp; Driver:</span>
                   <span className="text-slate-700 text-xs font-medium">{cancellingRecord.vehicleType} • {cancellingRecord.driverName}</span>
                 </div>
+                <div>
+                  <span className="text-slate-500 text-[11px] block">Status Armada:</span>
+                  <span className={`px-2 py-0.5 rounded text-[11px] font-bold inline-block mt-0.5 ${
+                    cancellingRecord.status === 'WAITING_DOCK_QUEUE' 
+                      ? 'bg-amber-100 text-amber-800 border border-amber-300' 
+                      : 'bg-slate-100 text-slate-700'
+                  }`}>
+                    {cancellingRecord.status === 'WAITING_DOCK_QUEUE' ? 'Antri Mundur (WAITING_DOCK_QUEUE)' : cancellingRecord.status}
+                  </span>
+                </div>
               </div>
             </div>
+
+            {cancellingRecord.status !== 'WAITING_DOCK_QUEUE' && (
+              <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-xs text-rose-800 font-semibold">
+                ⚠️ Pembatalan hanya diperbolehkan untuk armada berstatus Antri Mundur (WAITING_DOCK_QUEUE). Armada yang sudah dialokasikan dock atau sedang proses bongkar tidak dapat dibatalkan melalui menu ini.
+              </div>
+            )}
 
             {/* Pilihan Alasan Utama */}
             <div className="space-y-2">
@@ -1344,7 +1402,11 @@ export const SupervisorView: React.FC = () => {
               <button
                 type="button"
                 id="btn-spv-confirm-cancel"
-                disabled={isSubmittingCancel || (cancelReasonOption === 'Lainnya (Tulis alasan)' && !customReasonText.trim())}
+                disabled={
+                  isSubmittingCancel || 
+                  cancellingRecord.status !== 'WAITING_DOCK_QUEUE' ||
+                  (cancelReasonOption === 'Lainnya (Tulis alasan)' && !customReasonText.trim())
+                }
                 onClick={async () => {
                   if (!cancellingRecord) return;
                   const finalReason = cancelReasonOption === 'Lainnya (Tulis alasan)' 
