@@ -37,21 +37,80 @@ import { formatDateTime, formatShortTime, calculateLeadTime, formatDuration, get
 import { GoogleDriveModal } from './GoogleDriveModal';
 
 /**
- * Kompresi gambar client-side menggunakan HTML5 Canvas
- * Resolusi maksimum 900px, format JPEG, kualitas 0.6 (60%)
+ * Helper kompresi gambar client-side ultra-efisien berbasis Canvas
+ * Mencegah browser crash 'Unable to complete previous operation due to low memory' pada HP:
+ * 1. Menggunakan URL.createObjectURL / createImageBitmap tanpa membaca string raksasa via FileReader
+ * 2. Batasi resolusi maksimal gambar (max dimension / width & height) ke 800px
+ * 3. Gambar ulang ke HTML5 Canvas dengan ukuran yang sudah di-downscale
+ * 4. Ekspor canvas ke data URL JPEG dengan kualitas 0.55 (ukuran hasil base64 < 150 KB)
+ * 5. Selalu lakukan URL.revokeObjectURL dan bersihkan canvas untuk membebaskan RAM HP seketika
  */
-const compressSuratJalanImage = (file: File): Promise<string> => {
+export const compressImageFile = async (file: File): Promise<string> => {
+  const maxDim = 800;
+
+  // Prioritas 1: Gunakan createImageBitmap jika didukung browser (decode native background paling hemat RAM)
+  if (typeof window !== 'undefined' && typeof window.createImageBitmap === 'function') {
+    try {
+      const bitmap = await window.createImageBitmap(file);
+      let { width, height } = bitmap;
+
+      if (width > height && width > maxDim) {
+        height = Math.round((height * maxDim) / width);
+        width = maxDim;
+      } else if (height > maxDim) {
+        width = Math.round((width * maxDim) / height);
+        height = maxDim;
+      }
+
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        bitmap.close();
+        throw new Error('Canvas 2D context tidak tersedia');
+      }
+
+      ctx.drawImage(bitmap, 0, 0, width, height);
+      bitmap.close(); // Bebaskan ImageBitmap dari GPU/RAM seketika
+
+      const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.55);
+
+      // Bersihkan canvas agar memori GPU/RAM segera dibebaskan
+      canvas.width = 0;
+      canvas.height = 0;
+
+      return compressedDataUrl;
+    } catch (err) {
+      console.warn('createImageBitmap gagal, beralih ke fallback createObjectURL:', err);
+    }
+  }
+
+  // Prioritas 2 / Fallback: URL.createObjectURL + HTMLImageElement (jauh lebih hemat daripada FileReader)
   return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.readAsDataURL(file);
-    reader.onload = (event) => {
-      const img = new Image();
-      img.src = event.target?.result as string;
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        const maxDim = 900;
-        let width = img.width;
-        let height = img.height;
+    let objectUrl: string | null = null;
+    try {
+      objectUrl = URL.createObjectURL(file);
+    } catch (err) {
+      reject(err);
+      return;
+    }
+
+    const img = new Image();
+
+    const cleanup = () => {
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl);
+        objectUrl = null;
+      }
+      img.onload = null;
+      img.onerror = null;
+    };
+
+    img.onload = () => {
+      try {
+        let width = img.naturalWidth || img.width;
+        let height = img.naturalHeight || img.height;
 
         if (width > height && width > maxDim) {
           height = Math.round((height * maxDim) / width);
@@ -61,24 +120,37 @@ const compressSuratJalanImage = (file: File): Promise<string> => {
           height = maxDim;
         }
 
+        const canvas = document.createElement('canvas');
         canvas.width = width;
         canvas.height = height;
         const ctx = canvas.getContext('2d');
         if (!ctx) {
-          resolve(img.src);
+          cleanup();
+          reject(new Error('Canvas 2D context tidak tersedia'));
           return;
         }
 
         ctx.drawImage(img, 0, 0, width, height);
-        // Format JPEG kualitas 0.6 (60%)
-        const compressedBase64 = canvas.toDataURL('image/jpeg', 0.6);
-        resolve(compressedBase64);
-      };
-      img.onerror = () => {
-        resolve(event.target?.result as string);
-      };
+        const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.55);
+
+        // Bersihkan canvas dari memory
+        canvas.width = 0;
+        canvas.height = 0;
+
+        cleanup();
+        resolve(compressedDataUrl);
+      } catch (e) {
+        cleanup();
+        reject(e);
+      }
     };
-    reader.onerror = (err) => reject(err);
+
+    img.onerror = () => {
+      cleanup();
+      reject(new Error('Gagal memuat gambar dari URL objek kamera'));
+    };
+
+    img.src = objectUrl;
   });
 };
 
@@ -113,6 +185,7 @@ export const AdminView: React.FC = () => {
   const [adminName1, setAdminName1] = useState(authUser?.name || 'Admin WH CKL');
   const [supplementalPhoto, setSupplementalPhoto] = useState<string | null>(null);
   const [isCompressingPhoto, setIsCompressingPhoto] = useState(false);
+  const [photoError, setPhotoError] = useState<string | null>(null);
   const [qcApprovalTime, setQcApprovalTime] = useState('');
   const [qcApprovedBy, setQcApprovedBy] = useState('');
 
@@ -144,6 +217,7 @@ export const AdminView: React.FC = () => {
     setDockInput(rec.assignedDock || 'Gudang BA1 depan');
     setAdminNotes1('');
     setSupplementalPhoto(rec.suratJalanPhoto || null);
+    setPhotoError(null);
     setQcApprovalTime(rec.qcApprovalTime || '');
     setQcApprovedBy(rec.qcApprovedBy || '');
   };
@@ -185,23 +259,34 @@ export const AdminView: React.FC = () => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
     const file = files[0];
+
+    // Reset nilai input agar jika user membatalkan/mencoba ulang file yang sama, event onChange tetap tertangkap
+    if (e.target) {
+      e.target.value = '';
+    }
+    setPhotoError(null);
+
     try {
       setIsCompressingPhoto(true);
-      const compressed = await compressSuratJalanImage(file);
+      // Kompresi resolusi maksimal 800px dan JPEG 0.55 untuk menghemat RAM HP
+      const compressed = await compressImageFile(file);
+      // Hanya simpan string base64 hasil kompresi ringan (< 150 KB) ke state
       setSupplementalPhoto(compressed);
+      setPhotoError(null);
     } catch (err) {
       console.error('Gagal memproses/mengompres foto Surat Jalan:', err);
-      alert('Gagal memproses foto Surat Jalan. Silakan coba kembali.');
+      const friendlyError = 'Gagal memuat foto, silakan coba ambil ulang dengan resolusi lebih rendah';
+      setPhotoError(friendlyError);
+      setActionToast(friendlyError);
+      setTimeout(() => setActionToast(null), 6000);
     } finally {
       setIsCompressingPhoto(false);
-      if (e.target) {
-        e.target.value = '';
-      }
     }
   };
 
   const handleRemoveSuratJalanPhoto = () => {
     setSupplementalPhoto(null);
+    setPhotoError(null);
     if (fileInputRef1.current) {
       fileInputRef1.current.value = '';
     }
@@ -314,16 +399,21 @@ export const AdminView: React.FC = () => {
     setUploadedPhotos(prev => [...prev, picked]);
   };
 
-  const handleFileUpload2 = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload2 = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
-    if (files) {
-      Array.from(files).forEach((file: File) => {
-        const reader = new FileReader();
-        reader.onloadend = () => {
-          setUploadedPhotos(prev => [...prev, reader.result as string]);
-        };
-        reader.readAsDataURL(file);
-      });
+    if (files && files.length > 0) {
+      const fileList: File[] = Array.from(files);
+      if (e.target) e.target.value = '';
+      for (const file of fileList) {
+        try {
+          const compressed = await compressImageFile(file);
+          setUploadedPhotos(prev => [...prev, compressed]);
+        } catch (err) {
+          console.error('Gagal kompres foto barang:', err);
+          setActionToast('Gagal memuat foto, silakan coba ambil ulang dengan resolusi lebih rendah');
+          setTimeout(() => setActionToast(null), 6000);
+        }
+      }
     }
   };
 
@@ -331,14 +421,20 @@ export const AdminView: React.FC = () => {
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
       {/* Action Toast Feedback */}
       {actionToast && (
-        <div className="bg-emerald-600 text-white p-3.5 rounded-xl shadow-lg flex items-center justify-between gap-3 animate-in fade-in slide-in-from-top-2 duration-300">
+        <div className={`p-3.5 rounded-xl shadow-lg flex items-center justify-between gap-3 animate-in fade-in slide-in-from-top-2 duration-300 ${
+          actionToast.includes('Gagal') ? 'bg-rose-600 text-white' : 'bg-emerald-600 text-white'
+        }`}>
           <div className="flex items-center gap-2.5 text-xs sm:text-sm font-semibold">
-            <CheckCircle2 className="w-5 h-5 text-emerald-200 shrink-0" />
+            {actionToast.includes('Gagal') ? (
+              <AlertTriangle className="w-5 h-5 text-rose-200 shrink-0" />
+            ) : (
+              <CheckCircle2 className="w-5 h-5 text-emerald-200 shrink-0" />
+            )}
             <span>{actionToast}</span>
           </div>
           <button
             onClick={() => setActionToast(null)}
-            className="text-emerald-200 hover:text-white p-1 rounded-lg transition cursor-pointer"
+            className="text-white/80 hover:text-white p-1 rounded-lg transition cursor-pointer"
           >
             <X className="w-4 h-4" />
           </button>
@@ -1271,9 +1367,29 @@ export const AdminView: React.FC = () => {
                     <span>Foto Dokumen Surat Jalan (Opsional)</span>
                   </label>
                   <span className="text-[10px] text-slate-500 font-semibold bg-white border border-slate-200 px-2 py-0.5 rounded-full">
-                    Opsional • Kompresi 900px JPEG
+                    Opsional • Kompresi 800px JPEG (&lt;150KB)
                   </span>
                 </div>
+
+                {/* Error Alert jika pengambilan / kompresi foto gagal */}
+                {photoError && (
+                  <div className="p-3 rounded-xl bg-rose-50 border border-rose-300 text-rose-800 text-xs flex items-start gap-2.5 animate-in fade-in duration-200">
+                    <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                    <div className="flex-1 space-y-0.5">
+                      <p className="font-bold text-rose-900">{photoError}</p>
+                      <p className="text-[11px] text-rose-700 leading-relaxed">
+                        Tip: Jika memori browser HP penuh, gunakan rasio standar kamera atau ambil foto ulang dari jarak fokus yang tepat.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setPhotoError(null)}
+                      className="text-rose-500 hover:text-rose-800 p-0.5 cursor-pointer rounded hover:bg-rose-100"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                )}
 
                 {supplementalPhoto ? (
                   <div className="space-y-2">
@@ -1301,7 +1417,7 @@ export const AdminView: React.FC = () => {
                           <span className="text-xs font-bold text-slate-800 truncate">Foto Surat Jalan Siap Disimpan</span>
                         </div>
                         <p className="text-[11px] text-slate-500">
-                          Format JPEG terkompresi otomatis (&le;900px, 60%) agar hemat kuota &amp; cepat terunggah ke Google Drive.
+                          Format JPEG terkompresi otomatis (&le;800px, 55%) agar hemat RAM HP &amp; cepat terunggah ke Google Drive (&lt;150 KB).
                         </p>
                         <div className="flex items-center gap-2 pt-1">
                           <button
@@ -1346,17 +1462,17 @@ export const AdminView: React.FC = () => {
                       )}
                     </button>
                     <p className="text-[11px] text-slate-500 text-center">
-                      💡 Mengaktifkan kamera smartphone otomatis. Foto otomatis dikompresi ringan via Canvas (&le;900px JPEG kualitas 60%).
+                      💡 Mengaktifkan kamera smartphone otomatis. Foto otomatis dikompresi ringan via Canvas (&le;800px JPEG kualitas 55%, hemat RAM HP &lt;150 KB).
                     </p>
                   </div>
                 )}
 
-                {/* Hidden input file dengan accept="image/*" dan capture="environment" untuk kamera smartphone */}
+                {/* Hidden input file dengan accept="image/jpeg,image/png" dan capture="environment" untuk kamera smartphone */}
                 <input
                   type="file"
                   ref={fileInputRef1}
                   onChange={handleSuratJalanPhotoUpload}
-                  accept="image/*"
+                  accept="image/jpeg,image/png"
                   capture="environment"
                   className="hidden"
                 />
@@ -1621,7 +1737,7 @@ export const AdminView: React.FC = () => {
                   ref={fileInputRef2}
                   onChange={handleFileUpload2}
                   multiple
-                  accept="image/*"
+                  accept="image/jpeg,image/png"
                   className="hidden"
                 />
               </div>
