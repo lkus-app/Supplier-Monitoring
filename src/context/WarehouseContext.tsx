@@ -10,7 +10,10 @@ import {
   setGoogleAppsScriptUrl
 } from '../utils/googleSheetsSync';
 
-const AUTH_STORAGE_KEY = 'warehouse_unloading_auth_user_v1';
+const AUTH_STORAGE_KEY = 'wh_auth_session';
+const LEGACY_AUTH_KEY = 'warehouse_unloading_auth_user_v1';
+const VIEW_STORAGE_KEY = 'wh_active_view';
+const ROLE_STORAGE_KEY = 'wh_active_role';
 const SYNC_CHANNEL_NAME = 'sim_bongkar_sync_channel_v2';
 
 interface WarehouseContextType {
@@ -111,16 +114,44 @@ const WarehouseContext = createContext<WarehouseContextType | undefined>(undefin
 
 export const WarehouseProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [records, setRecords] = useState<UnloadingRecord[]>([]);
-  const [activeView, setActiveView] = useState<AppViewType>('portal');
-  const [activeRole, setActiveRole] = useState<RoleType>('security');
+
+  // Restore authenticated user session from localStorage (wh_auth_session)
   const [authUser, setAuthUser] = useState<AuthUser | null>(() => {
     try {
-      const saved = localStorage.getItem(AUTH_STORAGE_KEY);
+      const saved = localStorage.getItem(AUTH_STORAGE_KEY) || localStorage.getItem(LEGACY_AUTH_KEY);
       if (saved) return JSON.parse(saved);
     } catch {
       // Fallback
     }
     return null;
+  });
+
+  // Restore active role
+  const [activeRole, setActiveRole] = useState<RoleType>(() => {
+    try {
+      const savedRole = localStorage.getItem(ROLE_STORAGE_KEY) as RoleType;
+      if (savedRole) return savedRole;
+      const savedAuth = localStorage.getItem(AUTH_STORAGE_KEY) || localStorage.getItem(LEGACY_AUTH_KEY);
+      if (savedAuth) {
+        const parsed = JSON.parse(savedAuth);
+        if (parsed?.role) return parsed.role;
+      }
+    } catch {}
+    return 'admin';
+  });
+
+  // Restore active view (stay on admin/operator/security screen on tab reload from camera)
+  const [activeView, setActiveView] = useState<AppViewType>(() => {
+    try {
+      const savedView = localStorage.getItem(VIEW_STORAGE_KEY) as AppViewType;
+      if (savedView && savedView !== 'portal') return savedView;
+      const savedAuth = localStorage.getItem(AUTH_STORAGE_KEY) || localStorage.getItem(LEGACY_AUTH_KEY);
+      if (savedAuth) {
+        const parsed = JSON.parse(savedAuth);
+        if (parsed?.role) return parsed.role;
+      }
+    } catch {}
+    return 'portal';
   });
 
   const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
@@ -227,11 +258,33 @@ export const WarehouseProvider: React.FC<{ children: ReactNode }> = ({ children 
         localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(authUser));
       } else {
         localStorage.removeItem(AUTH_STORAGE_KEY);
+        localStorage.removeItem(LEGACY_AUTH_KEY);
       }
     } catch (e) {
       console.error('Failed to save auth state:', e);
     }
   }, [authUser]);
+
+  // Sync Active View & Role to localStorage so refresh doesn't drop back to portal
+  useEffect(() => {
+    try {
+      if (activeView) {
+        localStorage.setItem(VIEW_STORAGE_KEY, activeView);
+      }
+    } catch (e) {
+      console.warn('Failed to save activeView state:', e);
+    }
+  }, [activeView]);
+
+  useEffect(() => {
+    try {
+      if (activeRole) {
+        localStorage.setItem(ROLE_STORAGE_KEY, activeRole);
+      }
+    } catch (e) {
+      console.warn('Failed to save activeRole state:', e);
+    }
+  }, [activeRole]);
 
   // Keep live time ticking every 2 seconds for reactive lead-time gauges
   useEffect(() => {
@@ -320,10 +373,21 @@ export const WarehouseProvider: React.FC<{ children: ReactNode }> = ({ children 
   const logout = () => {
     setAuthUser(null);
     setActiveView('portal');
+    try {
+      localStorage.removeItem(AUTH_STORAGE_KEY);
+      localStorage.removeItem(LEGACY_AUTH_KEY);
+      localStorage.removeItem(VIEW_STORAGE_KEY);
+      localStorage.removeItem(ROLE_STORAGE_KEY);
+    } catch (e) {
+      console.warn('Failed to clear auth from localStorage:', e);
+    }
   };
 
   const returnToPortal = () => {
     setActiveView('portal');
+    try {
+      localStorage.setItem(VIEW_STORAGE_KEY, 'portal');
+    } catch {}
   };
 
   const navigateToRole = (role: RoleType) => {

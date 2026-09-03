@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { 
   ClipboardCheck, 
   CheckCircle2, 
@@ -189,6 +189,63 @@ export const AdminView: React.FC = () => {
   const [qcApprovalTime, setQcApprovalTime] = useState('');
   const [qcApprovedBy, setQcApprovedBy] = useState('');
 
+  // Backup & Restore State Modal Form ke SessionStorage (Mencegah Kehilangan Input jika OS HP reload tab saat buka kamera)
+  const STEP1_FORM_BACKUP_KEY = 'wh_admin_step1_form_backup';
+
+  // Restore form modal jika tab browser HP me-reload saat membuka kamera
+  useEffect(() => {
+    if (!verifyingRecord && records.length > 0) {
+      try {
+        const saved = sessionStorage.getItem(STEP1_FORM_BACKUP_KEY);
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          const targetRec = records.find(r => r.id === parsed.recordId);
+          if (targetRec && targetRec.status === 'MENUNGGU_VERIFIKASI_PO') {
+            setVerifyingRecord(targetRec);
+            setDockInput(parsed.dockInput || targetRec.assignedDock || 'Gudang BA1 depan');
+            setAdminNotes1(parsed.adminNotes1 || '');
+            setAdminName1(parsed.adminName1 || authUser?.name || 'Admin WH CKL');
+            setSupplementalPhoto(parsed.supplementalPhoto || targetRec.suratJalanPhoto || null);
+            setQcApprovalTime(parsed.qcApprovalTime || targetRec.qcApprovalTime || '');
+            setQcApprovedBy(parsed.qcApprovedBy || targetRec.qcApprovedBy || '');
+          } else {
+            sessionStorage.removeItem(STEP1_FORM_BACKUP_KEY);
+          }
+        }
+      } catch (e) {
+        console.warn('Gagal memulihkan backup modal form verifikasi:', e);
+      }
+    }
+  }, [records, verifyingRecord, authUser?.name]);
+
+  // Simpan data input form modal ke sessionStorage secara reaktif
+  useEffect(() => {
+    if (verifyingRecord) {
+      try {
+        const backup = {
+          recordId: verifyingRecord.id,
+          dockInput,
+          adminNotes1,
+          adminName1,
+          supplementalPhoto,
+          qcApprovalTime,
+          qcApprovedBy,
+        };
+        sessionStorage.setItem(STEP1_FORM_BACKUP_KEY, JSON.stringify(backup));
+      } catch (e) {
+        console.warn('Gagal menyimpan backup form verifikasi ke sessionStorage:', e);
+      }
+    }
+  }, [verifyingRecord, dockInput, adminNotes1, adminName1, supplementalPhoto, qcApprovalTime, qcApprovedBy]);
+
+  const handleCloseVerify = () => {
+    setVerifyingRecord(null);
+    setPhotoError(null);
+    try {
+      sessionStorage.removeItem(STEP1_FORM_BACKUP_KEY);
+    } catch {}
+  };
+
   // Step 2 Finalization Modal / Drawer State
   const [finalizingRecord, setFinalizingRecord] = useState<UnloadingRecord | null>(null);
   const [operatorCount, setOperatorCount] = useState<number>(3);
@@ -255,7 +312,9 @@ export const AdminView: React.FC = () => {
   };
 
   // Handle upload & compress foto Surat Jalan (Step 1 - Opsional)
-  const handleSuratJalanPhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleSuratJalanPhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
     const files = e.target.files;
     if (!files || files.length === 0) return;
     const file = files[0];
@@ -265,23 +324,26 @@ export const AdminView: React.FC = () => {
       e.target.value = '';
     }
     setPhotoError(null);
+    setIsCompressingPhoto(true);
 
-    try {
-      setIsCompressingPhoto(true);
-      // Kompresi resolusi maksimal 800px dan JPEG 0.55 untuk menghemat RAM HP
-      const compressed = await compressImageFile(file);
-      // Hanya simpan string base64 hasil kompresi ringan (< 150 KB) ke state
-      setSupplementalPhoto(compressed);
-      setPhotoError(null);
-    } catch (err) {
-      console.error('Gagal memproses/mengompres foto Surat Jalan:', err);
-      const friendlyError = 'Gagal memuat foto, silakan coba ambil ulang dengan resolusi lebih rendah';
-      setPhotoError(friendlyError);
-      setActionToast(friendlyError);
-      setTimeout(() => setActionToast(null), 6000);
-    } finally {
-      setIsCompressingPhoto(false);
-    }
+    // Jalankan kompresi secara async tanpa memblokir thread UI utama
+    setTimeout(async () => {
+      try {
+        // Kompresi resolusi maksimal 800px dan JPEG 0.55 untuk menghemat RAM HP
+        const compressed = await compressImageFile(file);
+        // Hanya simpan string base64 hasil kompresi ringan (< 150 KB) ke state
+        setSupplementalPhoto(compressed);
+        setPhotoError(null);
+      } catch (err) {
+        console.error('Gagal memproses/mengompres foto Surat Jalan:', err);
+        const friendlyError = 'Gagal memuat foto, silakan coba ambil ulang dengan resolusi lebih rendah';
+        setPhotoError(friendlyError);
+        setActionToast(friendlyError);
+        setTimeout(() => setActionToast(null), 6000);
+      } finally {
+        setIsCompressingPhoto(false);
+      }
+    }, 20);
   };
 
   const handleRemoveSuratJalanPhoto = () => {
@@ -319,7 +381,7 @@ export const AdminView: React.FC = () => {
 
     setActionToast(`Armada ${queueNum} diverifikasi & diarahkan LANGSUNG MUNDUR ke ${targetDock}.`);
     setTimeout(() => setActionToast(null), 5000);
-    setVerifyingRecord(null);
+    handleCloseVerify();
   };
 
   // Step 1 Option B: Hold / Antri Mundur
@@ -348,7 +410,7 @@ export const AdminView: React.FC = () => {
 
     setActionToast(`Armada ${queueNum} diverifikasi & masuk ke antrean HOLD MUNDUR (${targetDock}).`);
     setTimeout(() => setActionToast(null), 5000);
-    setVerifyingRecord(null);
+    handleCloseVerify();
   };
 
   // Action from "Antri Mundur" tab: Panggil / Siap Mundur
@@ -400,6 +462,8 @@ export const AdminView: React.FC = () => {
   };
 
   const handleFileUpload2 = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
     const files = e.target.files;
     if (files && files.length > 0) {
       const fileList: File[] = Array.from(files);
@@ -1151,7 +1215,8 @@ export const AdminView: React.FC = () => {
                 </div>
               </div>
               <button
-                onClick={() => setVerifyingRecord(null)}
+                type="button"
+                onClick={handleCloseVerify}
                 className="text-slate-400 hover:text-slate-700 p-1 rounded-lg hover:bg-slate-100 transition cursor-pointer"
               >
                 <X className="w-5 h-5" />
@@ -1422,16 +1487,33 @@ export const AdminView: React.FC = () => {
                         <div className="flex items-center gap-2 pt-1">
                           <button
                             type="button"
-                            onClick={() => fileInputRef1.current?.click()}
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              fileInputRef1.current?.click();
+                            }}
                             disabled={isCompressingPhoto}
-                            className="inline-flex items-center gap-1 text-[11px] px-2.5 py-1 rounded-lg bg-blue-50 text-blue-700 hover:bg-blue-100 font-semibold cursor-pointer transition border border-blue-200"
+                            className="inline-flex items-center gap-1 text-[11px] px-2.5 py-1 rounded-lg bg-blue-50 text-blue-700 hover:bg-blue-100 font-semibold cursor-pointer transition border border-blue-200 disabled:opacity-60 disabled:cursor-not-allowed"
                           >
-                            <RefreshCw className="w-3 h-3" />
-                            <span>Ganti Foto</span>
+                            {isCompressingPhoto ? (
+                              <>
+                                <div className="w-3 h-3 border-2 border-blue-600 border-t-transparent rounded-full animate-spin shrink-0" />
+                                <span>Mengompresi...</span>
+                              </>
+                            ) : (
+                              <>
+                                <RefreshCw className="w-3 h-3 shrink-0" />
+                                <span>Ganti Foto</span>
+                              </>
+                            )}
                           </button>
                           <button
                             type="button"
-                            onClick={handleRemoveSuratJalanPhoto}
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              handleRemoveSuratJalanPhoto();
+                            }}
                             className="inline-flex items-center gap-1 text-[11px] px-2.5 py-1 rounded-lg bg-red-50 text-red-700 hover:bg-red-100 font-semibold cursor-pointer transition border border-red-200"
                           >
                             <Trash2 className="w-3 h-3" />
@@ -1445,18 +1527,22 @@ export const AdminView: React.FC = () => {
                   <div className="space-y-1.5">
                     <button
                       type="button"
-                      onClick={() => fileInputRef1.current?.click()}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        fileInputRef1.current?.click();
+                      }}
                       disabled={isCompressingPhoto}
-                      className="w-full flex items-center justify-center gap-2 p-3 rounded-xl border border-dashed border-blue-300 bg-white hover:bg-blue-50/70 text-blue-700 font-bold text-xs sm:text-sm cursor-pointer transition hover:border-blue-400 shadow-2xs"
+                      className="w-full flex items-center justify-center gap-2 p-3 rounded-xl border border-dashed border-blue-300 bg-white hover:bg-blue-50/70 text-blue-700 font-bold text-xs sm:text-sm cursor-pointer transition hover:border-blue-400 shadow-2xs disabled:opacity-70 disabled:cursor-not-allowed"
                     >
                       {isCompressingPhoto ? (
-                        <>
-                          <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
-                          <span>Mengompresi Foto Surat Jalan...</span>
-                        </>
+                        <div className="flex items-center gap-2 py-0.5">
+                          <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin shrink-0" />
+                          <span className="text-blue-800 font-bold">Sedang mengompresi foto Surat Jalan...</span>
+                        </div>
                       ) : (
                         <>
-                          <Camera className="w-4 h-4 text-blue-600" />
+                          <Camera className="w-4 h-4 text-blue-600 shrink-0" />
                           <span>📷 Ambil Foto / Upload Surat Jalan (Opsional)</span>
                         </>
                       )}
@@ -1467,12 +1553,13 @@ export const AdminView: React.FC = () => {
                   </div>
                 )}
 
-                {/* Hidden input file dengan accept="image/jpeg,image/png" dan capture="environment" untuk kamera smartphone */}
+                {/* Hidden input file dengan accept="image/*" dan capture="environment" untuk kamera smartphone */}
                 <input
                   type="file"
                   ref={fileInputRef1}
+                  onClick={(e) => e.stopPropagation()}
                   onChange={handleSuratJalanPhotoUpload}
-                  accept="image/jpeg,image/png"
+                  accept="image/*"
                   capture="environment"
                   className="hidden"
                 />
@@ -1503,7 +1590,7 @@ export const AdminView: React.FC = () => {
               <div className="pt-3 border-t border-slate-100 flex flex-col sm:flex-row items-stretch sm:items-center justify-end gap-2.5">
                 <button
                   type="button"
-                  onClick={() => setVerifyingRecord(null)}
+                  onClick={handleCloseVerify}
                   className="px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold cursor-pointer text-xs sm:text-sm order-3 sm:order-1"
                 >
                   Batal
@@ -1513,14 +1600,14 @@ export const AdminView: React.FC = () => {
                 <button
                   type="button"
                   onClick={handleVerifyAndHold}
-                  disabled={!isTankiValid}
+                  disabled={!isTankiValid || isCompressingPhoto}
                   id="btn-verify-hold-queue"
                   className={`px-4 py-2.5 rounded-xl font-bold flex items-center justify-center gap-2 shadow-sm text-xs sm:text-sm order-2 transition ${
-                    !isTankiValid
+                    !isTankiValid || isCompressingPhoto
                       ? 'bg-slate-300 text-slate-500 cursor-not-allowed border border-slate-300'
                       : 'bg-amber-500 hover:bg-amber-600 text-white cursor-pointer'
                   }`}
-                  title={!isTankiValid ? "Jam ACC QC wajib diisi terlebih dahulu untuk zona tangki" : "Verifikasi dokumen dan simpan di antrean hold mundur"}
+                  title={!isTankiValid ? "Jam ACC QC wajib diisi terlebih dahulu untuk zona tangki" : isCompressingPhoto ? "Menunggu proses kompresi foto..." : "Verifikasi dokumen dan simpan di antrean hold mundur"}
                 >
                   <PauseCircle className="w-4 h-4" />
                   <span>Verifikasi &amp; Hold (Antri Mundur)</span>
@@ -1530,14 +1617,14 @@ export const AdminView: React.FC = () => {
                 <button
                   type="button"
                   onClick={handleVerifyAndDirect}
-                  disabled={!isTankiValid}
+                  disabled={!isTankiValid || isCompressingPhoto}
                   id="btn-verify-direct-dock"
                   className={`px-5 py-2.5 rounded-xl font-bold flex items-center justify-center gap-2 shadow-sm text-xs sm:text-sm order-1 sm:order-3 transition ${
-                    !isTankiValid
+                    !isTankiValid || isCompressingPhoto
                       ? 'bg-slate-300 text-slate-500 cursor-not-allowed border border-slate-300'
                       : 'bg-blue-600 hover:bg-blue-700 text-white cursor-pointer'
                   }`}
-                  title={!isTankiValid ? "Jam ACC QC wajib diisi terlebih dahulu untuk zona tangki" : "Verifikasi dokumen dan langsung izinkan armada mundur ke dock"}
+                  title={!isTankiValid ? "Jam ACC QC wajib diisi terlebih dahulu untuk zona tangki" : isCompressingPhoto ? "Menunggu proses kompresi foto..." : "Verifikasi dokumen dan langsung izinkan armada mundur ke dock"}
                 >
                   <Check className="w-4 h-4" />
                   <span>Verifikasi &amp; Langsung Mundur</span>
@@ -1726,7 +1813,11 @@ export const AdminView: React.FC = () => {
 
                 <button
                   type="button"
-                  onClick={() => fileInputRef2.current?.click()}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    fileInputRef2.current?.click();
+                  }}
                   className="w-full flex items-center justify-center gap-2 p-2.5 rounded-lg border border-dashed border-slate-300 bg-slate-50 hover:bg-slate-100 text-slate-600 text-xs font-semibold cursor-pointer transition"
                 >
                   <Upload className="w-4 h-4 text-emerald-600" />
@@ -1735,9 +1826,10 @@ export const AdminView: React.FC = () => {
                 <input
                   type="file"
                   ref={fileInputRef2}
+                  onClick={(e) => e.stopPropagation()}
                   onChange={handleFileUpload2}
                   multiple
-                  accept="image/jpeg,image/png"
+                  accept="image/*"
                   className="hidden"
                 />
               </div>
