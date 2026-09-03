@@ -80,6 +80,19 @@ export interface UnloadingRecord {
   assignedDock?: string; // e.g., Dock 01, Dock 02
   adminNotesStep1?: string;
   adminNameStep1?: string;
+  qcApprovalTime?: string; // Timestamp / jam ACC QC (Wajib untuk Tanki Fructose & Glucose)
+  qcApprovedBy?: string; // Nama staff QC / Admin pencatat
+
+  // Relokasi & Permintaan Ganti Zona Bongkar (Operator -> SPV)
+  zoneChangeRequest?: {
+    requestedZone: WarehouseZone;
+    reason: string;
+    requestedAt: string;
+    requestedBy?: string;
+    status: 'PENDING' | 'APPROVED' | 'REJECTED';
+    reviewedAt?: string;
+    reviewedBy?: string;
+  };
   
   // Operator inputs (T3 & T4 Operator)
   t3UnloadingStart?: string; // ISO String timestamp

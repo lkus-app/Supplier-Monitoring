@@ -26,12 +26,61 @@ import {
   Eye,
   Megaphone,
   PauseCircle,
-  Play
+  Play,
+  Trash2,
+  RefreshCw,
+  FlaskConical
 } from 'lucide-react';
 import { useWarehouse } from '../context/WarehouseContext';
 import { UnloadingRecord, GoodsCondition, WAREHOUSE_ZONES } from '../types';
 import { formatDateTime, formatShortTime, calculateLeadTime, formatDuration, getLocalDateString, isRecordToday } from '../utils/timeUtils';
 import { GoogleDriveModal } from './GoogleDriveModal';
+
+/**
+ * Kompresi gambar client-side menggunakan HTML5 Canvas
+ * Resolusi maksimum 900px, format JPEG, kualitas 0.6 (60%)
+ */
+const compressSuratJalanImage = (file: File): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = (event) => {
+      const img = new Image();
+      img.src = event.target?.result as string;
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const maxDim = 900;
+        let width = img.width;
+        let height = img.height;
+
+        if (width > height && width > maxDim) {
+          height = Math.round((height * maxDim) / width);
+          width = maxDim;
+        } else if (height > maxDim) {
+          width = Math.round((width * maxDim) / height);
+          height = maxDim;
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          resolve(img.src);
+          return;
+        }
+
+        ctx.drawImage(img, 0, 0, width, height);
+        // Format JPEG kualitas 0.6 (60%)
+        const compressedBase64 = canvas.toDataURL('image/jpeg', 0.6);
+        resolve(compressedBase64);
+      };
+      img.onerror = () => {
+        resolve(event.target?.result as string);
+      };
+    };
+    reader.onerror = (err) => reject(err);
+  });
+};
 
 export const AdminView: React.FC = () => {
   const { 
@@ -63,6 +112,9 @@ export const AdminView: React.FC = () => {
   const [adminNotes1, setAdminNotes1] = useState('');
   const [adminName1, setAdminName1] = useState(authUser?.name || 'Admin WH CKL');
   const [supplementalPhoto, setSupplementalPhoto] = useState<string | null>(null);
+  const [isCompressingPhoto, setIsCompressingPhoto] = useState(false);
+  const [qcApprovalTime, setQcApprovalTime] = useState('');
+  const [qcApprovedBy, setQcApprovedBy] = useState('');
 
   // Step 2 Finalization Modal / Drawer State
   const [finalizingRecord, setFinalizingRecord] = useState<UnloadingRecord | null>(null);
@@ -92,6 +144,19 @@ export const AdminView: React.FC = () => {
     setDockInput(rec.assignedDock || 'Gudang BA1 depan');
     setAdminNotes1('');
     setSupplementalPhoto(rec.suratJalanPhoto || null);
+    setQcApprovalTime(rec.qcApprovalTime || '');
+    setQcApprovedBy(rec.qcApprovedBy || '');
+  };
+
+  // Helper untuk validasi syarat Jam ACC QC pada Tanki Fructose & Glucose
+  const isTankiZone = dockInput === 'Tanki Fructose' || dockInput === 'Tanki Glucose';
+  const isTankiValid = !isTankiZone || (qcApprovalTime.trim().length > 0);
+
+  const handleSetCurrentQcTime = () => {
+    const now = new Date();
+    const hours = String(now.getHours()).padStart(2, '0');
+    const minutes = String(now.getMinutes()).padStart(2, '0');
+    setQcApprovalTime(`${hours}:${minutes} WIB`);
   };
 
   // Dynamic active workload counter per warehouse zone
@@ -115,11 +180,43 @@ export const AdminView: React.FC = () => {
     };
   };
 
+  // Handle upload & compress foto Surat Jalan (Step 1 - Opsional)
+  const handleSuratJalanPhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    const file = files[0];
+    try {
+      setIsCompressingPhoto(true);
+      const compressed = await compressSuratJalanImage(file);
+      setSupplementalPhoto(compressed);
+    } catch (err) {
+      console.error('Gagal memproses/mengompres foto Surat Jalan:', err);
+      alert('Gagal memproses foto Surat Jalan. Silakan coba kembali.');
+    } finally {
+      setIsCompressingPhoto(false);
+      if (e.target) {
+        e.target.value = '';
+      }
+    }
+  };
+
+  const handleRemoveSuratJalanPhoto = () => {
+    setSupplementalPhoto(null);
+    if (fileInputRef1.current) {
+      fileInputRef1.current.value = '';
+    }
+  };
+
   // Step 1 Option A: Direct Unload / Langsung Mundur
   const handleVerifyAndDirect = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!verifyingRecord || !dockInput.trim()) {
       alert('Mohon pilih Zona Gudang Bongkar.');
+      return;
+    }
+
+    if (isTankiZone && !qcApprovalTime.trim()) {
+      alert(`Wajib mengisi Jam ACC QC untuk verifikasi bongkaran ${dockInput}.`);
       return;
     }
 
@@ -130,7 +227,9 @@ export const AdminView: React.FC = () => {
       assignedDock: targetDock,
       adminNotes: adminNotes1,
       adminName: adminName1,
-      suratJalanPhoto: supplementalPhoto || undefined,
+      suratJalanPhoto: supplementalPhoto ?? '',
+      qcApprovalTime: isTankiZone ? qcApprovalTime.trim() : undefined,
+      qcApprovedBy: isTankiZone ? (qcApprovedBy.trim() || undefined) : undefined,
     });
 
     setActionToast(`Armada ${queueNum} diverifikasi & diarahkan LANGSUNG MUNDUR ke ${targetDock}.`);
@@ -145,6 +244,11 @@ export const AdminView: React.FC = () => {
       return;
     }
 
+    if (isTankiZone && !qcApprovalTime.trim()) {
+      alert(`Wajib mengisi Jam ACC QC untuk verifikasi bongkaran ${dockInput}.`);
+      return;
+    }
+
     const queueNum = verifyingRecord.queueNumber;
     const targetDock = dockInput;
 
@@ -152,7 +256,9 @@ export const AdminView: React.FC = () => {
       assignedDock: targetDock,
       adminNotes: adminNotes1,
       adminName: adminName1,
-      suratJalanPhoto: supplementalPhoto || undefined,
+      suratJalanPhoto: supplementalPhoto ?? '',
+      qcApprovalTime: isTankiZone ? qcApprovalTime.trim() : undefined,
+      qcApprovedBy: isTankiZone ? (qcApprovedBy.trim() || undefined) : undefined,
     });
 
     setActionToast(`Armada ${queueNum} diverifikasi & masuk ke antrean HOLD MUNDUR (${targetDock}).`);
@@ -560,6 +666,15 @@ export const AdminView: React.FC = () => {
                             </span>
                           )}
                         </div>
+                        {rec.qcApprovalTime && (
+                          <div className="flex justify-between items-center text-[11px] bg-amber-100/70 text-amber-950 px-2 py-1 rounded border border-amber-300">
+                            <span className="font-semibold flex items-center gap-1">
+                              <FlaskConical className="w-3 h-3 text-amber-700" />
+                              ACC QC:
+                            </span>
+                            <span className="font-mono font-bold">{rec.qcApprovalTime} {rec.qcApprovedBy ? `(${rec.qcApprovedBy})` : ''}</span>
+                          </div>
+                        )}
                         {rec.adminNotes && (
                           <div className="pt-1 text-[11px] text-slate-600 italic">
                             Catatan: &quot;{rec.adminNotes}&quot;
@@ -1068,6 +1183,74 @@ export const AdminView: React.FC = () => {
                 })()}
               </div>
 
+              {/* FITUR 1: Syarat Jam ACC QC untuk Tanki Fructose & Glucose */}
+              {isTankiZone && (
+                <div className="p-3.5 rounded-xl bg-amber-50/90 border-2 border-amber-400 space-y-2.5 animate-in fade-in duration-200">
+                  <div className="flex items-center justify-between">
+                    <label className="font-bold text-amber-950 flex items-center gap-1.5 text-xs">
+                      <FlaskConical className="w-4 h-4 text-amber-600 shrink-0" />
+                      <span>Syarat Khusus: Jam ACC QC ({dockInput})</span>
+                      <span className="text-red-600 font-black text-xs">*Wajib</span>
+                    </label>
+                    <span className="text-[10px] bg-amber-200 text-amber-900 font-bold px-2 py-0.5 rounded-full">
+                      Penerimaan Tangki
+                    </span>
+                  </div>
+
+                  <p className="text-[11px] text-amber-900/90 leading-relaxed">
+                    Untuk penerimaan armada tangki (Fructose / Glucose), armada hanya boleh di-ACC/diverifikasi setelah hasil sampling QC dinyatakan lulus.
+                  </p>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-0.5">
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-bold text-slate-700 block">
+                        Jam ACC QC <span className="text-red-500 font-bold">*Wajib</span>
+                      </label>
+                      <div className="flex items-center gap-1.5">
+                        <div className="relative flex-1">
+                          <input
+                            type="text"
+                            value={qcApprovalTime}
+                            onChange={(e) => setQcApprovalTime(e.target.value)}
+                            placeholder="Contoh: 14:30 WIB"
+                            className="w-full px-3 py-2 bg-white border border-amber-300 rounded-lg text-slate-900 font-mono text-xs focus:ring-2 focus:ring-amber-500 focus:outline-none"
+                          />
+                        </div>
+                        <button
+                          type="button"
+                          onClick={handleSetCurrentQcTime}
+                          className="px-2.5 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-[11px] font-bold shrink-0 transition cursor-pointer shadow-2xs flex items-center gap-1"
+                          title="Isi dengan jam saat ini (WIB)"
+                        >
+                          <Clock className="w-3.5 h-3.5" />
+                          <span>Isi Sekarang (WIB)</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-bold text-slate-700 block">
+                        Petugas / Analis QC (Opsional)
+                      </label>
+                      <input
+                        type="text"
+                        value={qcApprovedBy}
+                        onChange={(e) => setQcApprovedBy(e.target.value)}
+                        placeholder="Contoh: Analis QC / Ibu Siti"
+                        className="w-full px-3 py-2 bg-white border border-amber-300 rounded-lg text-slate-900 text-xs focus:ring-2 focus:ring-amber-500 focus:outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  {!qcApprovalTime.trim() && (
+                    <div className="flex items-center gap-1.5 text-[11px] text-red-600 font-semibold pt-0.5">
+                      <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                      <span>Wajib mengisi Jam ACC QC untuk mengaktifkan tombol verifikasi di bawah.</span>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Catatan / Keterangan Admin */}
               <div className="space-y-1.5">
                 <label className="font-bold text-slate-700">Catatan Staging / Instruksi Khusus (Opsional)</label>
@@ -1077,6 +1260,105 @@ export const AdminView: React.FC = () => {
                   onChange={(e) => setAdminNotes1(e.target.value)}
                   placeholder="Contoh: Muatan prioritas lini produksi 1, gunakan palet plastik atau tanki buffer."
                   className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 text-xs"
+                />
+              </div>
+
+              {/* Upload / Foto Fisik Surat Jalan (Opsional) */}
+              <div className="space-y-2 p-3.5 rounded-xl bg-slate-50 border border-slate-200">
+                <div className="flex items-center justify-between">
+                  <label className="font-bold text-slate-800 flex items-center gap-1.5 text-xs">
+                    <FileText className="w-3.5 h-3.5 text-blue-600" />
+                    <span>Foto Dokumen Surat Jalan (Opsional)</span>
+                  </label>
+                  <span className="text-[10px] text-slate-500 font-semibold bg-white border border-slate-200 px-2 py-0.5 rounded-full">
+                    Opsional • Kompresi 900px JPEG
+                  </span>
+                </div>
+
+                {supplementalPhoto ? (
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-3 p-2.5 bg-white rounded-xl border border-slate-200 shadow-2xs">
+                      <div className="relative group shrink-0">
+                        <img
+                          src={supplementalPhoto}
+                          alt="Pratinjau Surat Jalan"
+                          onClick={() => setPreviewPhotoModal(supplementalPhoto)}
+                          className="w-16 h-16 sm:w-20 sm:h-20 object-cover rounded-lg border border-slate-300 cursor-pointer hover:opacity-90 transition shadow-2xs"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setPreviewPhotoModal(supplementalPhoto)}
+                          className="absolute inset-0 bg-black/40 text-white opacity-0 group-hover:opacity-100 flex items-center justify-center rounded-lg transition cursor-pointer"
+                          title="Perbesar foto"
+                        >
+                          <Eye className="w-4 h-4" />
+                        </button>
+                      </div>
+
+                      <div className="flex-1 min-w-0 space-y-1">
+                        <div className="flex items-center gap-1.5">
+                          <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                          <span className="text-xs font-bold text-slate-800 truncate">Foto Surat Jalan Siap Disimpan</span>
+                        </div>
+                        <p className="text-[11px] text-slate-500">
+                          Format JPEG terkompresi otomatis (&le;900px, 60%) agar hemat kuota &amp; cepat terunggah ke Google Drive.
+                        </p>
+                        <div className="flex items-center gap-2 pt-1">
+                          <button
+                            type="button"
+                            onClick={() => fileInputRef1.current?.click()}
+                            disabled={isCompressingPhoto}
+                            className="inline-flex items-center gap-1 text-[11px] px-2.5 py-1 rounded-lg bg-blue-50 text-blue-700 hover:bg-blue-100 font-semibold cursor-pointer transition border border-blue-200"
+                          >
+                            <RefreshCw className="w-3 h-3" />
+                            <span>Ganti Foto</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleRemoveSuratJalanPhoto}
+                            className="inline-flex items-center gap-1 text-[11px] px-2.5 py-1 rounded-lg bg-red-50 text-red-700 hover:bg-red-100 font-semibold cursor-pointer transition border border-red-200"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                            <span>Hapus Foto</span>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-1.5">
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef1.current?.click()}
+                      disabled={isCompressingPhoto}
+                      className="w-full flex items-center justify-center gap-2 p-3 rounded-xl border border-dashed border-blue-300 bg-white hover:bg-blue-50/70 text-blue-700 font-bold text-xs sm:text-sm cursor-pointer transition hover:border-blue-400 shadow-2xs"
+                    >
+                      {isCompressingPhoto ? (
+                        <>
+                          <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+                          <span>Mengompresi Foto Surat Jalan...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Camera className="w-4 h-4 text-blue-600" />
+                          <span>📷 Ambil Foto / Upload Surat Jalan (Opsional)</span>
+                        </>
+                      )}
+                    </button>
+                    <p className="text-[11px] text-slate-500 text-center">
+                      💡 Mengaktifkan kamera smartphone otomatis. Foto otomatis dikompresi ringan via Canvas (&le;900px JPEG kualitas 60%).
+                    </p>
+                  </div>
+                )}
+
+                {/* Hidden input file dengan accept="image/*" dan capture="environment" untuk kamera smartphone */}
+                <input
+                  type="file"
+                  ref={fileInputRef1}
+                  onChange={handleSuratJalanPhotoUpload}
+                  accept="image/*"
+                  capture="environment"
+                  className="hidden"
                 />
               </div>
 
@@ -1090,6 +1372,16 @@ export const AdminView: React.FC = () => {
                   className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-slate-900 text-xs"
                 />
               </div>
+
+              {/* Warning when Tanki zone without QC ACC */}
+              {!isTankiValid && (
+                <div className="p-2.5 rounded-xl bg-rose-50 border border-rose-300 text-rose-800 text-xs flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                  <span>
+                    <strong>Tombol Verifikasi Dinonaktifkan:</strong> Untuk zona <strong>{dockInput}</strong>, mohon isi <strong>Jam ACC QC</strong> terlebih dahulu.
+                  </span>
+                </div>
+              )}
 
               {/* Two Action Buttons */}
               <div className="pt-3 border-t border-slate-100 flex flex-col sm:flex-row items-stretch sm:items-center justify-end gap-2.5">
@@ -1105,9 +1397,14 @@ export const AdminView: React.FC = () => {
                 <button
                   type="button"
                   onClick={handleVerifyAndHold}
+                  disabled={!isTankiValid}
                   id="btn-verify-hold-queue"
-                  className="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-bold flex items-center justify-center gap-2 cursor-pointer shadow-sm text-xs sm:text-sm order-2"
-                  title="Verifikasi dokumen dan simpan di antrean hold mundur"
+                  className={`px-4 py-2.5 rounded-xl font-bold flex items-center justify-center gap-2 shadow-sm text-xs sm:text-sm order-2 transition ${
+                    !isTankiValid
+                      ? 'bg-slate-300 text-slate-500 cursor-not-allowed border border-slate-300'
+                      : 'bg-amber-500 hover:bg-amber-600 text-white cursor-pointer'
+                  }`}
+                  title={!isTankiValid ? "Jam ACC QC wajib diisi terlebih dahulu untuk zona tangki" : "Verifikasi dokumen dan simpan di antrean hold mundur"}
                 >
                   <PauseCircle className="w-4 h-4" />
                   <span>Verifikasi &amp; Hold (Antri Mundur)</span>
@@ -1117,9 +1414,14 @@ export const AdminView: React.FC = () => {
                 <button
                   type="button"
                   onClick={handleVerifyAndDirect}
+                  disabled={!isTankiValid}
                   id="btn-verify-direct-dock"
-                  className="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold flex items-center justify-center gap-2 cursor-pointer shadow-sm text-xs sm:text-sm order-1 sm:order-3"
-                  title="Verifikasi dokumen dan langsung izinkan armada mundur ke dock"
+                  className={`px-5 py-2.5 rounded-xl font-bold flex items-center justify-center gap-2 shadow-sm text-xs sm:text-sm order-1 sm:order-3 transition ${
+                    !isTankiValid
+                      ? 'bg-slate-300 text-slate-500 cursor-not-allowed border border-slate-300'
+                      : 'bg-blue-600 hover:bg-blue-700 text-white cursor-pointer'
+                  }`}
+                  title={!isTankiValid ? "Jam ACC QC wajib diisi terlebih dahulu untuk zona tangki" : "Verifikasi dokumen dan langsung izinkan armada mundur ke dock"}
                 >
                   <Check className="w-4 h-4" />
                   <span>Verifikasi &amp; Langsung Mundur</span>

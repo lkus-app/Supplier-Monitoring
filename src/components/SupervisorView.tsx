@@ -21,7 +21,11 @@ import {
   Sparkles,
   HardDrive,
   Trash2,
-  RefreshCw
+  RefreshCw,
+  ArrowRightLeft,
+  ArrowRight,
+  Check,
+  X
 } from 'lucide-react';
 import { useWarehouse } from '../context/WarehouseContext';
 import { VehicleType, VEHICLE_LEAD_TIMES, UnloadingRecord } from '../types';
@@ -49,12 +53,18 @@ export const SupervisorView: React.FC = () => {
     authUser,
     clearAllData,
     isSyncing,
-    refreshDataFromServer
+    refreshDataFromServer,
+    approveZoneChange,
+    rejectZoneChange
   } = useWarehouse();
 
   const [isGoogleDriveOpen, setIsGoogleDriveOpen] = useState(false);
   const [isClearConfirmOpen, setIsClearConfirmOpen] = useState(false);
   const [isClearing, setIsClearing] = useState(false);
+
+  // Permintaan Ganti Zona Bongkar (Operator -> SPV)
+  const [actionToast, setActionToast] = useState<string | null>(null);
+  const [isActingId, setIsActingId] = useState<string | null>(null);
 
   // Search & Filter state
   const [searchQuery, setSearchQuery] = useState('');
@@ -182,8 +192,59 @@ export const SupervisorView: React.FC = () => {
     window.print();
   };
 
+  // Permintaan Ganti Zona Bongkar (Operator -> SPV)
+  const pendingZoneRequests = useMemo(() => {
+    return records.filter((r) => r.zoneChangeRequest && r.zoneChangeRequest.status === 'PENDING');
+  }, [records]);
+
+  const handleApproveZone = async (rec: UnloadingRecord) => {
+    if (!rec.zoneChangeRequest) return;
+    const target = rec.zoneChangeRequest.requestedZone;
+    try {
+      setIsActingId(rec.id);
+      await approveZoneChange(rec.id);
+      setActionToast(`Berhasil menyetujui pemindahan zona armada ${rec.queueNumber} ke "${target}"!`);
+      setTimeout(() => setActionToast(null), 5000);
+    } catch (err) {
+      console.error(err);
+      alert('Gagal menyetujui pergantian zona.');
+    } finally {
+      setIsActingId(null);
+    }
+  };
+
+  const handleRejectZone = async (rec: UnloadingRecord) => {
+    try {
+      setIsActingId(rec.id);
+      await rejectZoneChange(rec.id);
+      setActionToast(`Permohonan ganti zona armada ${rec.queueNumber} telah ditolak.`);
+      setTimeout(() => setActionToast(null), 5000);
+    } catch (err) {
+      console.error(err);
+      alert('Gagal menolak permohonan.');
+    } finally {
+      setIsActingId(null);
+    }
+  };
+
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6 print:p-0 print:m-0">
+      {/* Toast Notification */}
+      {actionToast && (
+        <div className="bg-emerald-600 text-white px-4 py-3 rounded-xl shadow-lg flex items-center justify-between gap-3 animate-in fade-in slide-in-from-top-2 duration-300">
+          <div className="flex items-center gap-2 text-xs sm:text-sm font-bold">
+            <CheckCircle2 className="w-5 h-5 shrink-0" />
+            <span>{actionToast}</span>
+          </div>
+          <button 
+            onClick={() => setActionToast(null)} 
+            className="text-emerald-100 hover:text-white p-1 rounded-lg hover:bg-emerald-700/50 cursor-pointer"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
       {/* Header Banner */}
       <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4 print:hidden">
         <div className="space-y-1">
@@ -287,6 +348,108 @@ export const SupervisorView: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {/* PENDING ZONE CHANGE REQUESTS SECTION (OPERATOR -> SPV) */}
+      {pendingZoneRequests.length > 0 && (
+        <div className="bg-amber-50 border-2 border-amber-300 rounded-2xl p-5 shadow-sm space-y-4 animate-in fade-in slide-in-from-top-2 duration-300 print:hidden">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-amber-200 pb-3">
+            <div className="flex items-center gap-2.5">
+              <span className="p-2 rounded-xl bg-amber-200 text-amber-900">
+                <ArrowRightLeft className="w-5 h-5" />
+              </span>
+              <div>
+                <h3 className="text-base sm:text-lg font-black text-amber-950 flex items-center gap-2">
+                  <span>Permintaan Relokasi / Ganti Zona Bongkar</span>
+                  <span className="px-2.5 py-0.5 rounded-full bg-amber-600 text-white text-xs font-black animate-pulse">
+                    {pendingZoneRequests.length} Menunggu Persetujuan
+                  </span>
+                </h3>
+                <p className="text-xs text-amber-800">
+                  Operator lapangan mengajukan pemindahan zona bongkar armada di bawah ini. Silakan tinjau dan berikan keputusan:
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {pendingZoneRequests.map((rec) => {
+              const req = rec.zoneChangeRequest!;
+              const isActing = isActingId === rec.id;
+
+              return (
+                <div
+                  key={rec.id}
+                  className="bg-white border border-amber-200 rounded-xl p-4 shadow-sm space-y-3 flex flex-col justify-between hover:border-amber-400 transition"
+                >
+                  <div className="space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-mono font-black px-2.5 py-1 rounded bg-blue-50 text-blue-700 border border-blue-200">
+                        {rec.queueNumber}
+                      </span>
+                      <span className="text-[11px] text-slate-500 font-mono flex items-center gap-1">
+                        <Clock className="w-3.5 h-3.5 text-slate-400" />
+                        Diajukan: {formatShortTime(req.requestedAt)}
+                      </span>
+                    </div>
+
+                    <div>
+                      <h4 className="font-bold text-slate-900 text-base">{rec.supplierName}</h4>
+                      <p className="text-xs font-mono text-slate-600">
+                        {rec.licensePlate} • {rec.driverName} • {rec.vehicleType}
+                      </p>
+                    </div>
+
+                    {/* Zone Transition */}
+                    <div className="p-2.5 rounded-lg bg-amber-50/70 border border-amber-200 text-xs flex items-center justify-between gap-2">
+                      <div className="space-y-0.5">
+                        <span className="text-[10px] text-slate-500 block uppercase font-bold">Zona Asal</span>
+                        <span className="font-semibold text-slate-700">{rec.assignedDock || 'Belum Ditentukan'}</span>
+                      </div>
+                      <ArrowRight className="w-4 h-4 text-amber-600 shrink-0" />
+                      <div className="space-y-0.5 text-right">
+                        <span className="text-[10px] text-amber-800 block uppercase font-extrabold">Zona Tujuan Baru</span>
+                        <span className="font-extrabold text-blue-700 bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
+                          {req.requestedZone}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Alasan */}
+                    <div className="text-xs space-y-1">
+                      <span className="text-slate-500 font-medium">Alasan Operator ({req.requestedBy}):</span>
+                      <p className="p-2.5 rounded bg-slate-50 border border-slate-200 text-slate-700 italic text-[11px]">
+                        &quot;{req.reason}&quot;
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Actions: Setujui vs Tolak */}
+                  <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
+                    <button
+                      type="button"
+                      disabled={isActing}
+                      onClick={() => handleRejectZone(rec)}
+                      className="px-3 py-2 rounded-lg border border-rose-200 bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold text-xs flex items-center gap-1.5 transition cursor-pointer disabled:opacity-50"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                      <span>Tolak</span>
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isActing}
+                      onClick={() => handleApproveZone(rec)}
+                      className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs flex items-center gap-1.5 transition cursor-pointer shadow-sm disabled:opacity-50 active:scale-[0.98]"
+                    >
+                      <Check className="w-3.5 h-3.5" />
+                      <span>Setujui Pindah ke {req.requestedZone}</span>
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* 4 QUICK STAT CARDS (SPECIFICATION CORE REQUIREMENT) */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -568,7 +731,20 @@ export const SupervisorView: React.FC = () => {
                           {/* Supplier & Plat */}
                           <td className="px-4 py-3.5">
                             <div className="font-bold text-slate-900">{rec.supplierName}</div>
-                            <div className="text-[11px] font-mono text-slate-500">{rec.licensePlate} • <span className="font-semibold text-blue-600">{rec.assignedDock || 'No Dock'}</span></div>
+                            <div className="text-[11px] font-mono text-slate-500 flex items-center flex-wrap gap-1">
+                              <span>{rec.licensePlate} •</span>
+                              <span className="font-semibold text-blue-600">{rec.assignedDock || 'No Dock'}</span>
+                              {rec.zoneChangeRequest?.status === 'PENDING' && (
+                                <span className="px-1.5 py-0.2 rounded bg-amber-100 text-amber-800 font-bold text-[10px] border border-amber-300 animate-pulse">
+                                  Req SPV: {rec.zoneChangeRequest.requestedZone}
+                                </span>
+                              )}
+                              {rec.zoneChangeRequest?.status === 'APPROVED' && (
+                                <span className="px-1.5 py-0.2 rounded bg-emerald-100 text-emerald-800 font-bold text-[10px] border border-emerald-200">
+                                  Relokasi ACC
+                                </span>
+                              )}
+                            </div>
                           </td>
 
                           {/* Kendaraan (Lead Time) */}

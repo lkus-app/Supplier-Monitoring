@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useMemo, ReactNode, useCallback, useRef } from 'react';
-import { UnloadingRecord, RoleType, AppViewType, AuthUser, DEMO_ACCOUNTS, OperationalStats, GoodsCondition, VehicleType } from '../types';
+import { UnloadingRecord, RoleType, AppViewType, AuthUser, DEMO_ACCOUNTS, OperationalStats, GoodsCondition, VehicleType, WarehouseZone } from '../types';
 import { calculateLeadTime, getLocalDateString, isRecordToday } from '../utils/timeUtils';
 import {
   fetchRecordsFromGoogleSheets,
@@ -57,6 +57,8 @@ interface WarehouseContextType {
     adminNotes?: string;
     adminName?: string;
     suratJalanPhoto?: string;
+    qcApprovalTime?: string;
+    qcApprovedBy?: string;
   }) => Promise<void>;
 
   verifyPOAndHold: (id: string, data: {
@@ -65,11 +67,18 @@ interface WarehouseContextType {
     adminNotes?: string;
     adminName?: string;
     suratJalanPhoto?: string;
+    qcApprovalTime?: string;
+    qcApprovedBy?: string;
   }) => Promise<void>;
 
   releaseQueueToDock: (id: string) => Promise<void>;
   
   startUnloading: (id: string, operatorName: string) => Promise<void>;
+
+  // Relokasi & Ganti Zona Bongkar
+  requestZoneChange: (id: string, newZone: WarehouseZone, reason: string) => Promise<void>;
+  approveZoneChange: (id: string) => Promise<void>;
+  rejectZoneChange: (id: string) => Promise<void>;
   
   operatorFinishUnloading: (id: string, data: {
     operatorName?: string;
@@ -472,6 +481,8 @@ export const WarehouseProvider: React.FC<{ children: ReactNode }> = ({ children 
     adminNotes?: string;
     adminName?: string;
     suratJalanPhoto?: string;
+    qcApprovalTime?: string;
+    qcApprovedBy?: string;
   }) => {
     const nowIso = new Date().toISOString();
     let updatedItem: UnloadingRecord | null = null;
@@ -485,7 +496,9 @@ export const WarehouseProvider: React.FC<{ children: ReactNode }> = ({ children 
           assignedDock: data.assignedDock.trim(),
           adminNotesStep1: data.adminNotes?.trim(),
           adminNameStep1: data.adminName?.trim() || authUser?.name || 'Admin Gudang',
-          suratJalanPhoto: data.suratJalanPhoto || item.suratJalanPhoto,
+          suratJalanPhoto: data.suratJalanPhoto !== undefined ? data.suratJalanPhoto : item.suratJalanPhoto,
+          qcApprovalTime: data.qcApprovalTime !== undefined ? data.qcApprovalTime : item.qcApprovalTime,
+          qcApprovedBy: data.qcApprovedBy !== undefined ? data.qcApprovedBy : item.qcApprovedBy,
           status: 'PO_READY_DOCK_ASSIGNED',
         };
         return updatedItem;
@@ -516,6 +529,8 @@ export const WarehouseProvider: React.FC<{ children: ReactNode }> = ({ children 
     adminNotes?: string;
     adminName?: string;
     suratJalanPhoto?: string;
+    qcApprovalTime?: string;
+    qcApprovedBy?: string;
   }) => {
     const nowIso = new Date().toISOString();
     let updatedItem: UnloadingRecord | null = null;
@@ -529,7 +544,9 @@ export const WarehouseProvider: React.FC<{ children: ReactNode }> = ({ children 
           assignedDock: data.assignedDock.trim(),
           adminNotesStep1: data.adminNotes?.trim(),
           adminNameStep1: data.adminName?.trim() || authUser?.name || 'Admin Gudang',
-          suratJalanPhoto: data.suratJalanPhoto || item.suratJalanPhoto,
+          suratJalanPhoto: data.suratJalanPhoto !== undefined ? data.suratJalanPhoto : item.suratJalanPhoto,
+          qcApprovalTime: data.qcApprovalTime !== undefined ? data.qcApprovalTime : item.qcApprovalTime,
+          qcApprovedBy: data.qcApprovedBy !== undefined ? data.qcApprovedBy : item.qcApprovedBy,
           status: 'WAITING_DOCK_QUEUE',
         };
         return updatedItem;
@@ -596,6 +613,119 @@ export const WarehouseProvider: React.FC<{ children: ReactNode }> = ({ children 
           t3UnloadingStart: nowIso,
           operatorName: operatorName.trim() || authUser?.name || 'Operator Dock',
           status: 'SEDANG_BONGKAR',
+        };
+        return updatedItem;
+      }
+      return item;
+    });
+
+    setRecords(updated);
+    broadcastRecords(updated);
+
+    if (updatedItem) {
+      try {
+        setIsSyncing(true);
+        await saveRecordToGoogleSheets(updatedItem);
+      } catch (err) {
+        console.warn('GAS save error:', err);
+      } finally {
+        setIsSyncing(false);
+        setLastSyncTime(new Date().toLocaleTimeString('id-ID'));
+      }
+    }
+  };
+
+  // Action: Request Relokasi / Ganti Zona Bongkar (Operator -> SPV)
+  const requestZoneChange = async (id: string, newZone: WarehouseZone, reason: string) => {
+    const nowIso = new Date().toISOString();
+    let updatedItem: UnloadingRecord | null = null;
+
+    const updated = records.map((item) => {
+      if (item.id === id) {
+        updatedItem = {
+          ...item,
+          zoneChangeRequest: {
+            requestedZone: newZone,
+            reason: reason.trim(),
+            requestedAt: nowIso,
+            requestedBy: authUser?.name || 'Operator WH CKL',
+            status: 'PENDING' as const,
+          },
+        };
+        return updatedItem;
+      }
+      return item;
+    });
+
+    setRecords(updated);
+    broadcastRecords(updated);
+
+    if (updatedItem) {
+      try {
+        setIsSyncing(true);
+        await saveRecordToGoogleSheets(updatedItem);
+      } catch (err) {
+        console.warn('GAS save error:', err);
+      } finally {
+        setIsSyncing(false);
+        setLastSyncTime(new Date().toLocaleTimeString('id-ID'));
+      }
+    }
+  };
+
+  // Action: Approve Ganti Zona Bongkar (SPV)
+  const approveZoneChange = async (id: string) => {
+    const nowIso = new Date().toISOString();
+    let updatedItem: UnloadingRecord | null = null;
+
+    const updated = records.map((item) => {
+      if (item.id === id && item.zoneChangeRequest && item.zoneChangeRequest.status === 'PENDING') {
+        updatedItem = {
+          ...item,
+          assignedDock: item.zoneChangeRequest.requestedZone,
+          zoneChangeRequest: {
+            ...item.zoneChangeRequest,
+            status: 'APPROVED' as const,
+            reviewedAt: nowIso,
+            reviewedBy: authUser?.name || 'Supervisor WH CKL',
+          },
+        };
+        return updatedItem;
+      }
+      return item;
+    });
+
+    setRecords(updated);
+    broadcastRecords(updated);
+
+    if (updatedItem) {
+      try {
+        setIsSyncing(true);
+        await saveRecordToGoogleSheets(updatedItem);
+      } catch (err) {
+        console.warn('GAS save error:', err);
+      } finally {
+        setIsSyncing(false);
+        setLastSyncTime(new Date().toLocaleTimeString('id-ID'));
+      }
+    }
+  };
+
+  // Action: Reject Ganti Zona Bongkar (SPV)
+  const rejectZoneChange = async (id: string) => {
+    const nowIso = new Date().toISOString();
+    let updatedItem: UnloadingRecord | null = null;
+
+    const updated = records.map((item) => {
+      if (item.id === id && item.zoneChangeRequest && item.zoneChangeRequest.status === 'PENDING') {
+        updatedItem = {
+          ...item,
+          zoneChangeRequest: {
+            ...item.zoneChangeRequest,
+            status: 'REJECTED' as const,
+            reviewedAt: nowIso,
+            reviewedBy: authUser?.name || 'Supervisor WH CKL',
+          },
         };
         return updatedItem;
       }
@@ -776,6 +906,9 @@ export const WarehouseProvider: React.FC<{ children: ReactNode }> = ({ children 
         verifyPOAndHold,
         releaseQueueToDock,
         startUnloading,
+        requestZoneChange,
+        approveZoneChange,
+        rejectZoneChange,
         operatorFinishUnloading,
         finishUnloading,
         deleteRecord,

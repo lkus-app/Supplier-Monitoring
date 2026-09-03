@@ -19,17 +19,19 @@ import {
   Send,
   FileCheck,
   Image as ImageIcon,
-  Check
+  Check,
+  ArrowRightLeft
 } from 'lucide-react';
 import { useWarehouse } from '../context/WarehouseContext';
 import { formatShortTime, formatDateTime, calculateLeadTime, formatDuration } from '../utils/timeUtils';
-import { UnloadingRecord, WAREHOUSE_ZONES } from '../types';
+import { UnloadingRecord, WAREHOUSE_ZONES, WarehouseZone } from '../types';
 
 export const OperatorView: React.FC = () => {
   const { 
     records, 
     startUnloading, 
     operatorFinishUnloading,
+    requestZoneChange,
     currentTime, 
     setActiveRole, 
     setSelectedRecord,
@@ -47,6 +49,12 @@ export const OperatorView: React.FC = () => {
   const [uploadedPhotos, setUploadedPhotos] = useState<string[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [successToast, setSuccessToast] = useState<string | null>(null);
+
+  // Modal State for Permintaan Ganti Zona Bongkar (Operator -> SPV)
+  const [zoneChangeModalRecord, setZoneChangeModalRecord] = useState<UnloadingRecord | null>(null);
+  const [targetZone, setTargetZone] = useState<WarehouseZone>('Gudang BA1 depan');
+  const [zoneChangeReason, setZoneChangeReason] = useState('');
+  const [isSubmittingZoneChange, setIsSubmittingZoneChange] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -124,6 +132,37 @@ export const OperatorView: React.FC = () => {
       alert('Gagal mengirim verifikasi ke admin.');
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  // Handlers untuk Pengajuan Ganti Zona Bongkar (Operator -> SPV)
+  const handleOpenZoneChangeModal = (rec: UnloadingRecord) => {
+    setZoneChangeModalRecord(rec);
+    const otherZones = WAREHOUSE_ZONES.filter(z => z !== rec.assignedDock);
+    setTargetZone(otherZones[0] || 'Gudang BA1 depan');
+    setZoneChangeReason('');
+  };
+
+  const handleSubmitZoneChange = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!zoneChangeModalRecord) return;
+    if (!zoneChangeReason.trim()) {
+      alert('Mohon tuliskan alasan pengajuan relokasi/ganti zona.');
+      return;
+    }
+
+    try {
+      setIsSubmittingZoneChange(true);
+      await requestZoneChange(zoneChangeModalRecord.id, targetZone, zoneChangeReason);
+      const queueNum = zoneChangeModalRecord.queueNumber;
+      setZoneChangeModalRecord(null);
+      setSuccessToast(`Pengajuan ganti zona armada ${queueNum} ke "${targetZone}" berhasil dikirim ke Supervisor!`);
+      setTimeout(() => setSuccessToast(null), 5000);
+    } catch (err) {
+      console.error(err);
+      alert('Gagal mengajukan ganti zona. Silakan coba kembali.');
+    } finally {
+      setIsSubmittingZoneChange(false);
     }
   };
 
@@ -298,6 +337,39 @@ export const OperatorView: React.FC = () => {
                         </p>
                       )}
                     </div>
+
+                    {/* Status Permintaan Ganti Zona atau Tombol Ajukan */}
+                    {rec.zoneChangeRequest?.status === 'PENDING' ? (
+                      <div className="p-2.5 rounded-lg bg-amber-50 border border-amber-300 text-amber-900 text-xs space-y-1">
+                        <div className="flex items-center justify-between font-bold">
+                          <span className="flex items-center gap-1.5">
+                            <Clock className="w-3.5 h-3.5 text-amber-600 animate-spin" />
+                            Menunggu Persetujuan SPV
+                          </span>
+                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-200 text-amber-900 font-extrabold">
+                            PENDING
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-amber-900">
+                          Pengajuan ganti ke: <strong className="text-amber-950">{rec.zoneChangeRequest.requestedZone}</strong>
+                        </p>
+                        <p className="text-[10px] text-slate-500 italic">
+                          Alasan: &quot;{rec.zoneChangeRequest.reason}&quot;
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="flex items-center justify-between gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleOpenZoneChangeModal(rec)}
+                          className="w-full py-2 px-3 rounded-lg border border-amber-200 bg-amber-50/60 hover:bg-amber-100 text-amber-900 font-bold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
+                          title="Ajukan permohonan pindah zona bongkar ke Supervisor"
+                        >
+                          <ArrowRightLeft className="w-3.5 h-3.5 text-amber-700" />
+                          <span>Ajukan Ganti Zona</span>
+                        </button>
+                      </div>
+                    )}
                   </div>
 
                   <div className="pt-2">
@@ -407,6 +479,44 @@ export const OperatorView: React.FC = () => {
                       />
                     </div>
                   </div>
+
+                  {/* Status Permintaan Ganti Zona atau Tombol Ajukan */}
+                  {rec.zoneChangeRequest?.status === 'PENDING' ? (
+                    <div className="p-2.5 rounded-lg bg-amber-50 border border-amber-300 text-amber-900 text-xs space-y-1">
+                      <div className="flex items-center justify-between font-bold">
+                        <span className="flex items-center gap-1.5">
+                          <Clock className="w-3.5 h-3.5 text-amber-600 animate-spin" />
+                          Menunggu Persetujuan SPV
+                        </span>
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-200 text-amber-900 font-extrabold">
+                          PENDING
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-amber-900">
+                        Pengajuan relokasi ke: <strong className="text-amber-950">{rec.zoneChangeRequest.requestedZone}</strong>
+                      </p>
+                      <p className="text-[10px] text-slate-500 italic">
+                        Alasan: &quot;{rec.zoneChangeRequest.reason}&quot;
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="flex items-center justify-between gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleOpenZoneChangeModal(rec)}
+                        className="py-1.5 px-3 rounded-lg border border-amber-200 bg-amber-50/60 hover:bg-amber-100 text-amber-900 font-bold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
+                        title="Ajukan permohonan pindah zona bongkar ke Supervisor"
+                      >
+                        <ArrowRightLeft className="w-3.5 h-3.5 text-amber-700" />
+                        <span>Ajukan Ganti Zona</span>
+                      </button>
+                      {rec.zoneChangeRequest?.status === 'REJECTED' && (
+                        <span className="text-[10px] text-rose-600 font-semibold truncate">
+                          Permintaan sebelumnya ditolak SPV
+                        </span>
+                      )}
+                    </div>
+                  )}
 
                   {/* Operator Actions: Finish Unload / Selesai Bongkar */}
                   <div className="flex flex-col sm:flex-row items-center justify-between gap-2.5 pt-2 border-t border-slate-100">
@@ -649,6 +759,118 @@ export const OperatorView: React.FC = () => {
                 >
                   <Send className="w-4 h-4" />
                   <span>Kirim Verifikasi ke Admin</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Dialog: Pengajuan Ganti Zona Bongkar (Operator -> SPV) */}
+      {zoneChangeModalRecord && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white border border-slate-200 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-5 my-6 animate-in fade-in zoom-in duration-200">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-amber-50 text-amber-600">
+                  <ArrowRightLeft className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-black text-slate-900 text-base sm:text-lg">
+                    Pengajuan Relokasi / Ganti Zona
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Kirim permintaan persetujuan pindah dock ke Supervisor WH
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setZoneChangeModalRecord(null)}
+                className="text-slate-400 hover:text-slate-700 p-1.5 rounded-lg hover:bg-slate-100 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Truck Info Summary */}
+            <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-2 text-xs">
+              <div className="flex justify-between items-center">
+                <span className="text-slate-500 font-medium">No Antrean / Armada:</span>
+                <span className="font-mono font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
+                  {zoneChangeModalRecord.queueNumber} • {zoneChangeModalRecord.licensePlate}
+                </span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-slate-500 font-medium">Nama Supplier:</span>
+                <span className="font-bold text-slate-800">{zoneChangeModalRecord.supplierName}</span>
+              </div>
+              <div className="flex justify-between items-center pt-1 border-t border-slate-200">
+                <span className="text-slate-500 font-medium">Zona Bongkar Saat Ini:</span>
+                <span className="font-bold text-slate-900 bg-amber-100 text-amber-900 px-2.5 py-0.5 rounded border border-amber-300">
+                  {zoneChangeModalRecord.assignedDock || 'Belum Ditentukan'}
+                </span>
+              </div>
+            </div>
+
+            <form onSubmit={handleSubmitZoneChange} className="space-y-4">
+              {/* Target Zone Selection */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-800 block">
+                  Pilih Zona Bongkar Tujuan Baru <span className="text-red-500">*</span>
+                </label>
+                <select
+                  value={targetZone}
+                  onChange={(e) => setTargetZone(e.target.value as WarehouseZone)}
+                  className="w-full px-3 py-2.5 bg-white border border-slate-300 rounded-xl text-slate-800 text-xs sm:text-sm font-semibold focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                >
+                  {WAREHOUSE_ZONES.map((zone) => (
+                    <option
+                      key={zone}
+                      value={zone}
+                      disabled={zone === zoneChangeModalRecord.assignedDock}
+                    >
+                      {zone} {zone === zoneChangeModalRecord.assignedDock ? '(Zona Saat Ini)' : ''}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-[11px] text-slate-500">
+                  Zona baru akan langsung diaplikasikan setelah Supervisor memberikan persetujuan (ACC).
+                </p>
+              </div>
+
+              {/* Reason Textarea */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-800 block">
+                  Alasan Relokasi / Ganti Zona <span className="text-red-500">*</span>
+                </label>
+                <textarea
+                  rows={3}
+                  value={zoneChangeReason}
+                  onChange={(e) => setZoneChangeReason(e.target.value)}
+                  placeholder="Contoh: Dock 01 sedang maintenance hidrolik / kapasitas buffer tanki penuh / dialihkan ke Bay 02..."
+                  className="w-full px-3 py-2.5 bg-white border border-slate-300 rounded-xl text-slate-800 text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                  required
+                />
+              </div>
+
+              {/* Actions */}
+              <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setZoneChangeModalRecord(null)}
+                  className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs transition cursor-pointer"
+                >
+                  Batal
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmittingZoneChange || !zoneChangeReason.trim()}
+                  id="btn-submit-req-zone"
+                  className="px-5 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-700 disabled:bg-slate-300 text-white font-bold text-xs flex items-center gap-1.5 transition cursor-pointer shadow-sm active:scale-[0.98]"
+                >
+                  <Send className="w-3.5 h-3.5" />
+                  <span>{isSubmittingZoneChange ? 'Mengirim...' : 'Kirim Pengajuan ke SPV'}</span>
                 </button>
               </div>
             </form>
